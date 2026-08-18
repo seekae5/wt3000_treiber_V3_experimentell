@@ -1483,4 +1483,4 @@ def restore_input_snapshot(config: InputConfig, snapshot: InputSnapshot) -> int:
         )
 
     _log.info("Eingangskonfiguration wiederhergestellt (%d Set-Kommandos)", written)
-    return written
+    return written
