@@ -1,0 +1,19 @@
+# UEBERARBEITET (Punkt 4, Projekt-Hygiene): Ausgabeverzeichnisse als Ganzes
+# ignorieren statt einzelner Endungen. '*.json'/'*.csv' global auszuschliessen
+# traf auch kuenftige Konfigurationsdateien im Quellbaum.
+messungen/
+konfiguration/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
