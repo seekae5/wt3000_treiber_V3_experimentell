@@ -35,7 +35,8 @@ from .wt3000_common import (
     SIGMB,
     canonical_scope,
     format_nrf,
-    is_element_scope,
+    # UEBERARBEITET (F-02, siehe AENDERUNGEN_2026-08-18.md): 'is_element_scope'
+    # entfernt - wurde importiert, aber in diesem Modul nie benutzt.
     parse_boolean,
     parse_nr3,
     scope_suffix,

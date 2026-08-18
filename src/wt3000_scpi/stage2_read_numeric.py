@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from collections import Counter
 from datetime import datetime
@@ -19,6 +18,7 @@ from pathlib import Path
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage2_read_numeric' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
+from .wt3000_common import setup_logging  # UEBERARBEITET (F-08)
 from .wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
 from .wt3000_numeric import ItemTable, ValueStatus, read_numeric_values
 
@@ -36,20 +36,9 @@ POLL_INTERVAL_S: float = 1.0
 EXERCISE_RESTORE_WRITE: bool = False
 
 
-def setup_logging(log_file: Path) -> None:
-    """Logging auf Konsole und in eine Protokolldatei einrichten."""
-    formatter = logging.Formatter("%(asctime)s %(levelname)-7s %(name)-18s %(message)s")
-
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setFormatter(formatter)
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.handlers.clear()
-    root.addHandler(console)
-    root.addHandler(file_handler)
+# UEBERARBEITET (F-08, siehe AENDERUNGEN_2026-08-18.md): setup_logging() lag in
+# allen fuenf Stufenskripten als byteweise identische Kopie. Es gibt sie jetzt
+# nur noch einmal, in wt3000_common.py; hier wird sie importiert.
 
 
 def check_preconditions(session: WTSession) -> None:
@@ -86,10 +75,17 @@ def check_preconditions(session: WTSession) -> None:
     log.info("NUMeric:HOLD = %s (in Stufe 2 nicht genutzt)", hold)
 
 
-def log_reading(table: ItemTable, cycle: int) -> Counter:
+# UEBERARBEITET (F-06, siehe AENDERUNGEN_2026-08-18.md): log_reading() bekommt
+# die Sitzung jetzt als Parameter - wie read_and_log() in Stufe 3. Vorher lief
+# der Zugriff ueber das modulweite '_SESSION', das erst in main() gesetzt wurde:
+# jeder Aufruf ausserhalb von main() (Import, Test, Wiederverwendung als
+# Bibliothek) traf auf None und lief in einen AttributeError auf None statt in
+# eine verstaendliche Fehlermeldung. Die Hilfsfunktion read_numeric_values_for() und
+# die Modulvariable _SESSION sind damit ersatzlos entfallen.
+def log_reading(session: WTSession, table: ItemTable, cycle: int) -> Counter:
     """Einen Lesedurchlauf ausgeben und die Statusverteilung zurueckgeben."""
     log = logging.getLogger("wt3000.stage2")
-    values = read_numeric_values_for(table)
+    values = read_numeric_values(session, expected_count=len(table.items))
 
     log.info("-" * 78)
     log.info("Lesedurchlauf %d", cycle)
@@ -102,19 +98,8 @@ def log_reading(table: ItemTable, cycle: int) -> Counter:
     return statistics
 
 
-def read_numeric_values_for(table: ItemTable):
-    """Hilfsfunktion: Werte passend zur Itemzahl der Tabelle lesen."""
-    return read_numeric_values(_SESSION, expected_count=len(table.items))
-
-
-# Modulweite Session-Referenz, damit die Hilfsfunktion oben schlank bleibt.
-_SESSION: WTSession | None = None
-
-
 def main() -> int:
     """Stufe 2 ausfuehren. Rueckgabewert 0 = erfolgreich."""
-    global _SESSION
-
     config = WTConfig()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = Path.cwd() / f"wt3000_stage2_{timestamp}.txt"
@@ -130,33 +115,43 @@ def main() -> int:
     try:
         with TmctlTransport(config) as transport:
             session = WTSession(transport, config, read_only=False)
-            _SESSION = session
 
             if config.use_remote:
                 session.enable_remote()
 
-            check_preconditions(session)
+            # UEBERARBEITET (F-07, siehe AENDERUNGEN_2026-08-18.md): try/finally
+            # um den Nutzteil, damit ':COMMunicate:REMote OFF' garantiert faellt.
+            # Vorher schaltete nur die zweite (Wiederherstellungs-)Sitzung die
+            # Fernsteuerung wieder ab. Brach der Lauf ab, bevor 'backup' gesetzt
+            # war, wurde diese zweite Sitzung nie geoeffnet - das Geraet blieb
+            # mit gesperrtem Bedienfeld zurueck. Stufe 3 und 4 machen es an
+            # dieser Stelle bereits so.
+            try:
+                check_preconditions(session)
 
-            # 1) Bestehende Tabelle sichern - als Erstes, vor allem anderen.
-            backup = ItemTable.read_from_device(session)
-            backup.save(backup_file)
-            log.info("Gesicherte Items:")
-            for item in backup.items:
-                log.info("  ITEM%-3d %-20s -> %s", item.index, item.argument, item.key)
+                # 1) Bestehende Tabelle sichern - als Erstes, vor allem anderen.
+                backup = ItemTable.read_from_device(session)
+                backup.save(backup_file)
+                log.info("Gesicherte Items:")
+                for item in backup.items:
+                    log.info("  ITEM%-3d %-20s -> %s", item.index, item.argument, item.key)
 
-            # 2) Messwerte lesen.
-            for cycle in range(1, READ_CYCLES + 1):
-                statistics = log_reading(backup, cycle)
-                log.info(
-                    "Statusverteilung: OK=%d, NO_DATA=%d, OVERRANGE=%d",
-                    statistics[ValueStatus.OK],
-                    statistics[ValueStatus.NO_DATA],
-                    statistics[ValueStatus.OVERRANGE],
-                )
-                if cycle < READ_CYCLES:
-                    time.sleep(POLL_INTERVAL_S)
+                # 2) Messwerte lesen.
+                for cycle in range(1, READ_CYCLES + 1):
+                    statistics = log_reading(session, backup, cycle)
+                    log.info(
+                        "Statusverteilung: OK=%d, NO_DATA=%d, OVERRANGE=%d",
+                        statistics[ValueStatus.OK],
+                        statistics[ValueStatus.NO_DATA],
+                        statistics[ValueStatus.OVERRANGE],
+                    )
+                    if cycle < READ_CYCLES:
+                        time.sleep(POLL_INTERVAL_S)
 
-            session.assert_no_error("Messwertabfrage")
+                session.assert_no_error("Messwertabfrage")
+
+            finally:
+                session.disable_remote()
 
     except WTError as exc:
         log.error("Abbruch: %s", exc)

@@ -23,15 +23,16 @@
 from __future__ import annotations
 
 import logging
-import sys
 from datetime import datetime
 from pathlib import Path
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage5b_range_probe' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
+from .wt3000_common import setup_logging  # UEBERARBEITET (F-08)
 from .wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
-from .wt3000_ranging import RangeBackup, probe_write_capability
+# UEBERARBEITET (F-09): probe_write_capability -> probe_range_write_capability
+from .wt3000_ranging import RangeBackup, probe_range_write_capability
 from .wt3000_rangeio import Quantity, RangeAccess
 
 # ---------------------------------------------------------------------------
@@ -47,20 +48,9 @@ ENABLE_NOOP_WRITE_PROBE: bool = False
 OUTPUT_DIR: Path = Path.cwd() / "konfiguration"
 
 
-def setup_logging(log_file: Path) -> None:
-    """Logging auf Konsole und in eine Protokolldatei einrichten."""
-    formatter = logging.Formatter("%(asctime)s %(levelname)-7s %(name)-18s %(message)s")
-
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setFormatter(formatter)
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.handlers.clear()
-    root.addHandler(console)
-    root.addHandler(file_handler)
+# UEBERARBEITET (F-08, siehe AENDERUNGEN_2026-08-18.md): setup_logging() lag in
+# allen fuenf Stufenskripten als byteweise identische Kopie. Es gibt sie jetzt
+# nur noch einmal, in wt3000_common.py; hier wird sie importiert.
 
 
 def report_environment(access: RangeAccess, log: logging.Logger) -> None:
@@ -103,7 +93,7 @@ def run_noop_write_probe(
     log.warning("Schreibprobe aktiviert - es wird EIN Set-Kommando gesendet")
 
     writable = RangeAccess(session, allow_changes=True)
-    probe_write_capability(writable, backup)
+    probe_range_write_capability(writable, backup)
 
     problems = backup.diff(RangeBackup.capture(writable))
     if problems:

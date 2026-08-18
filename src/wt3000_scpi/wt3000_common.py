@@ -14,6 +14,9 @@
 
 from __future__ import annotations
 
+import logging          # UEBERARBEITET (F-08)
+import sys              # UEBERARBEITET (F-08)
+from pathlib import Path  # UEBERARBEITET (F-08)
 from typing import Final
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
@@ -180,4 +183,44 @@ def values_match(requested: float, actual: float, tolerance: float = 1e-3) -> bo
     reference = max(abs(requested), abs(actual))
     if reference == 0.0:
         return True
-    return abs(requested - actual) / reference <= tolerance
+    return abs(requested - actual) / reference <= tolerance
+
+
+# ---------------------------------------------------------------------------
+# Protokollierung
+# UEBERARBEITET (F-08, siehe AENDERUNGEN_2026-08-18.md)
+# ---------------------------------------------------------------------------
+#
+# Diese Funktion stand bis hierher in ALLEN FUENF Stufenskripten - byteweise
+# identisch, 546 Zeichen, fuenf Kopien. Genau die Konstellation, aus der der
+# Klon unter 'Build/' entstanden ist: eine Kopie wird angepasst, vier bleiben
+# stehen. Sie liegt jetzt einmal hier.
+#
+# Warum in wt3000_common und nicht in einem eigenen Modul: die Funktion haengt
+# ausschliesslich an der Standardbibliothek, kennt kein Geraet und kein
+# Kommando - das ist die Definition dieses Moduls. Ein zusaetzliches Modul
+# haette dafuer die Schichtliste in __init__.py und in
+# tests/test_package_layout.py mitgezogen, ohne etwas zu gewinnen.
+
+
+def setup_logging(log_file: Path) -> None:
+    """Logging auf Konsole und in eine Protokolldatei einrichten.
+
+    Setzt die Handler des Root-Loggers neu. Gedacht fuer die Stufenskripte,
+    also fuer Programme, die den Prozess allein bewohnen. Wer den Treiber als
+    Bibliothek in eine groessere Anwendung einbaut, ruft diese Funktion NICHT
+    auf, sondern konfiguriert das Logging der Anwendung - sonst werden deren
+    Handler mit entfernt.
+    """
+    formatter = logging.Formatter("%(asctime)s %(levelname)-7s %(name)-18s %(message)s")
+
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(formatter)
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.handlers.clear()
+    root.addHandler(console)
+    root.addHandler(file_handler)

@@ -11,19 +11,19 @@
 from __future__ import annotations
 
 import logging
-import sys
 from datetime import datetime
 from pathlib import Path
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage4_measure' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
+from .wt3000_common import setup_logging  # UEBERARBEITET (F-08)
 from .wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
 from .wt3000_itemspec import (
     apply_item_table,
     build_item_table,
     probe_extra_items,
-    probe_write_capability,
+    probe_item_write_capability,  # UEBERARBEITET (F-09)
     restore_item_table,
     save_backup_bundle,
     verify_item_table,
@@ -69,20 +69,9 @@ OUTPUT_DIR: Path = Path.cwd() / "messungen"
 RUN_COMMENT: str = ""
 
 
-def setup_logging(log_file: Path) -> None:
-    """Logging auf Konsole und in eine Protokolldatei einrichten."""
-    formatter = logging.Formatter("%(asctime)s %(levelname)-7s %(name)-18s %(message)s")
-
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setFormatter(formatter)
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.handlers.clear()
-    root.addHandler(console)
-    root.addHandler(file_handler)
+# UEBERARBEITET (F-08, siehe AENDERUNGEN_2026-08-18.md): setup_logging() lag in
+# allen fuenf Stufenskripten als byteweise identische Kopie. Es gibt sie jetzt
+# nur noch einmal, in wt3000_common.py; hier wird sie importiert.
 
 
 def check_preconditions(session: WTSession) -> None:
@@ -161,7 +150,7 @@ def main() -> int:
                 save_backup_bundle(backup_file, backup, tail)
 
                 # 2) Fail-Fast, dann Tabelle schreiben und verifizieren.
-                probe_write_capability(session, target, backup)
+                probe_item_write_capability(session, target, backup)
                 apply_item_table(session, target)
                 problems = verify_item_table(session, target)
                 if problems:

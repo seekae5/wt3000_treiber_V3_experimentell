@@ -892,22 +892,35 @@ class InputConfig:
         unplausible Leistungswerte, wenn sie auf einen Kanal ohne Signal
         zeigt (Condition-Bit 7, PLLE).
         """
+        # UEBERARBEITET (F-05, siehe AENDERUNGEN_2026-08-18.md): Die Eingabe wird
+        # jetzt ZUERST ueber canonical_enum_token() auf die Langform gebracht und
+        # erst danach geprueft. Vorher wurde exakt gegen die Langformen der
+        # Aufzaehlung geprueft - eine Kurzform wie 'EXT' flog raus. Genau diese
+        # Kurzform liefert aber das Geraet selbst (VERBose ist aus), und
+        # InputSnapshot.capture() legt sie unveraendert in den Snapshot. Damit
+        # scheiterte restore_input_snapshot() mit 'Ungueltige Sync-Quelle' an
+        # einem Wert, den das Geraet zuvor selbst gemeldet hatte - die Korrektur
+        # zu INPUT-13 hatte Vergleich und Wiederherstellung angeglichen, den
+        # Eingang des Setters aber ausgelassen.
+        # Zweiter Punkt: 'valid' war eine Zweitfassung des Modulkonstanten
+        # SYNC_TOKENS - dieselbe Menge, zweimal gebildet. Jetzt nur noch eine.
         token = str(source.value if isinstance(source, SyncSource) else source).strip()
-        upper = token.upper()
-        valid = {s.value.upper() for s in SyncSource}
-        if upper not in valid:
+        canonical = canonical_enum_token(token, SYNC_TOKENS)
+        if canonical not in SYNC_TOKENS:
             raise WTError(
                 f"Ungueltige Sync-Quelle {source!r}. Erlaubt: "
-                f"{', '.join(sorted(valid))}"
+                f"{', '.join(sorted(SYNC_TOKENS))}"
             )
 
         self._write_element(
             GROUP_SYNC,
             _BASE_SYNC,
             target,
-            token,
+            # Gesendet wird die Langform - das Geraet akzeptiert sie ebenso wie
+            # die Kurzform, und im Protokoll steht dann, was gemeint war.
+            canonical,
             # UEBERARBEITET (INPUT-13): dieselbe Regel wie diff()/restore.
-            lambda actual: enum_match(upper, actual, SYNC_TOKENS),
+            lambda actual: enum_match(canonical, actual, SYNC_TOKENS),
             "Sync-Quelle setzen",
         )
 
@@ -975,16 +988,25 @@ class InputConfig:
         self, base: str, mode: MeasMode | str, target: int | str, label: str
     ) -> None:
         """Gemeinsamer Pfad fuer VOLTage:MODE und CURRent:MODE."""
+        # UEBERARBEITET (F-05, siehe AENDERUNGEN_2026-08-18.md): gleiche Ursache
+        # wie bei set_sync_source(). Das Geraet meldet den Messmodus in Kurzform
+        # ('RMEA' statt 'RMEAN'); restore_input_snapshot() reicht genau diesen
+        # Wert wieder herein und lief hier in ein WTError. Der Fehler wurde auch
+        # nicht von _restore_mode() aufgefangen - das faengt nur ConfigLocked -
+        # und hat damit die gesamte Wiederherstellung abgebrochen.
+        # 'MODE_TOKENS' ersetzt zugleich die zweite, inline gebildete Kopie
+        # derselben Wertemenge.
         token = str(mode.value if isinstance(mode, MeasMode) else mode).strip().upper()
-        if token not in {m.value for m in MeasMode}:
+        canonical = canonical_enum_token(token, MODE_TOKENS)
+        if canonical not in MODE_TOKENS:
             raise WTError(f"{label}: {mode!r} unzulaessig (RMS, MEAN, DC, RMEAN)")
         self._write_element(
             GROUP_MODE,
             base,
             target,
-            token,
+            canonical,
             # UEBERARBEITET (INPUT-13): dieselbe Regel wie diff()/restore.
-            lambda actual: enum_match(token, actual, MODE_TOKENS),
+            lambda actual: enum_match(canonical, actual, MODE_TOKENS),
             f"{label} setzen",
         )
 

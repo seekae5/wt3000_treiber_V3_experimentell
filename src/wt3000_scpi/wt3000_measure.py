@@ -11,7 +11,8 @@ from __future__ import annotations
 import csv
 import json
 import logging
-import math
+# UEBERARBEITET (F-01, siehe AENDERUNGEN_2026-08-18.md): 'import math' entfernt -
+# das Modul wurde hier nie benutzt.
 import statistics
 import time
 from dataclasses import dataclass, field

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
+from .wt3000_common import canonical_element  # UEBERARBEITET (F-04)
 from .wt3000_core import DeviceError, WTError, WTSession
 from .wt3000_numeric import ItemTable, NumericItem
 
@@ -70,11 +71,8 @@ def build_item_table(specs: tuple[ItemSpec, ...] | list[ItemSpec]) -> ItemTable:
 
 # ---------------------------------------------------------------------------
 # Vergleichsregeln
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Vergleichsregeln
+# UEBERARBEITET (F-03, siehe AENDERUNGEN_2026-08-18.md): dieser Kommentarkopf
+# stand zweimal unmittelbar hintereinander - die Dublette ist entfernt.
 # ---------------------------------------------------------------------------
 
 
@@ -93,22 +91,22 @@ def _functions_compatible(requested: str, actual: str) -> bool:
     return req == act or req.startswith(act)
 
 
+# UEBERARBEITET (F-04, siehe AENDERUNGEN_2026-08-18.md): Die Regel stand hier
+# als vollstaendige Zweitfassung von wt3000_common.canonical_element() - Zeile
+# fuer Zeile identisch. Zwei Kopien derselben SIGMA/SIGMB-Regel sind genau die
+# Konstellation, aus der der urspruengliche Vertauscher entstanden ist: eine
+# Kopie wird korrigiert, die andere nicht. Der Name bleibt als duenne
+# Weiterleitung bestehen, damit bestehende Aufrufer und Tests unveraendert
+# funktionieren; die Regel selbst liegt jetzt nur noch in wt3000_common.
 def _canonical_element(element: str | None) -> str:
     """Elementangabe auf ein eindeutiges Token normalisieren.
 
-    Hier ist KEIN Praefixmatching erlaubt: 'SIGMB'.startswith('SIGM') ist wahr,
-    eine Praefixregel wuerde also die Wiring-Units SigmaA und SigmaB
-    gleichsetzen. Bei der Verdrahtung V3A3,P1W2 (SigmaA = Elemente 1-3,
-    SigmaB = Element 4) waere das ein stiller Vertauscher.
+    Reine Weiterleitung an wt3000_common.canonical_element(). Dort steht auch
+    die Begruendung, warum hier KEIN Praefixmatching erlaubt ist:
+    'SIGMB'.startswith('SIGM') ist wahr, eine Praefixregel wuerde die
+    Wiring-Units SigmaA und SigmaB gleichsetzen.
     """
-    if element is None:
-        return "1"  # Geraet setzt Element 1, wenn <Element> weggelassen wird
-    token = element.strip().upper()
-    if token == "SIGMB":
-        return "SIGMB"
-    if token in {"SIGMA", "SIGM"}:
-        return "SIGMA"
-    return token
+    return canonical_element(element)
 
 
 def _elements_compatible(requested: str | None, actual: str | None) -> bool:
@@ -204,7 +202,16 @@ def load_backup_bundle(path: Path) -> tuple[ItemTable, list[NumericItem]]:
 # ---------------------------------------------------------------------------
 
 
-def probe_write_capability(session: WTSession, target: ItemTable, backup: ItemTable) -> None:
+# UEBERARBEITET (F-09, siehe AENDERUNGEN_2026-08-18.md): hiess bis hierher
+# 'probe_write_capability' - genau wie die gleichnamige Funktion in
+# wt3000_ranging.py, die etwas voellig anderes tut (sie schreibt einen
+# MESSBEREICH). Zwei gleich benannte Funktionen mit verschiedener Wirkung sind
+# in einer Bibliothek eine Stolperfalle: ein vertauschter Import haette hier
+# eine Item-Tabelle veraendert, wo ein Bereich gemeint war. Beide tragen jetzt
+# den Namen ihres Gegenstands.
+def probe_item_write_capability(
+    session: WTSession, target: ItemTable, backup: ItemTable
+) -> None:
     """Genau EIN Item schreiben und zuruecklesen, bevor die ganze Tabelle geht.
 
     Faellt der Test durch, ist nur ein einziges Item veraendert - der Restore

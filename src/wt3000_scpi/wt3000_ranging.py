@@ -382,7 +382,10 @@ def check_preconditions(access: RangeAccess) -> None:
     _log.info("Wiring: %s | Module: %s", access.get_wiring(), access.get_module())
 
 
-def probe_write_capability(access: RangeAccess, backup: RangeBackup) -> None:
+# UEBERARBEITET (F-09, siehe AENDERUNGEN_2026-08-18.md): hiess bis hierher
+# 'probe_write_capability' - genau wie die gleichnamige Funktion in
+# wt3000_itemspec.py, die eine Item-Tabelle anfasst. Siehe dort.
+def probe_range_write_capability(access: RangeAccess, backup: RangeBackup) -> None:
     """Den Schreibpfad testen, ohne etwas zu veraendern.
 
     Es wird der AKTUELLE Spannungsbereich des ersten Elements mit seinem
@@ -614,7 +617,7 @@ def applied_ranges(
     report = RangeReport(backup=backup)
 
     try:
-        probe_write_capability(access, backup)
+        probe_range_write_capability(access, backup)   # UEBERARBEITET (F-09)
         report.commands_written = apply_plan(access, plan)
         report.problems = verify_plan(access, plan, tolerance, allow_snapping)
         if report.problems:
