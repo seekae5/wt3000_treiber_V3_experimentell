@@ -304,6 +304,12 @@ class ItemAccess:
         verifizieren, Nutzblock, wiederherstellen.
 
         Die Wiederherstellung laeuft im finally und damit auch bei Strg+C.
+
+        UEBERARBEITET (P-2, siehe PLAN_BEFUNDE_2026-08-19.md): Was 'garantiert'
+        hier bedeutet, ist jetzt auch im Fehlerfall wahr. Wer diesen Block ohne
+        Ausnahme verlaesst, darf sich darauf verlassen, dass die Item-Tabelle
+        wieder im Ausgangszustand steht. Misslingt die Wiederherstellung, kommt
+        eine WTError heraus - siehe die Begruendung im finally.
         """
         self._require_writable()
 
@@ -317,8 +323,39 @@ class ItemAccess:
             self.apply(target, backup)
             yield target
         finally:
+            # UEBERARBEITET (P-2, siehe PLAN_BEFUNDE_2026-08-19.md): Der Fehler
+            # wurde hier bisher nur protokolliert und dann verschluckt. Ein
+            # Aufrufer konnte den Kontextmanager also normal verlassen, obwohl
+            # die Item-Tabelle nicht wiederhergestellt war - genau das, was der
+            # Docstring ausschliesst. 'applied_ranges()' in wt3000_ranging.py
+            # macht es an derselben Stelle seit jeher richtig und loest erneut
+            # aus; die beiden Ablaeufe verhalten sich jetzt gleich.
+            #
+            # Zur Fehlerverkettung: eine im finally ausgeloeste Ausnahme traegt
+            # eine bereits unterwegs befindliche automatisch als '__context__'
+            # mit. Schlaegt also erst der Nutzblock fehl und dann die
+            # Wiederherstellung, zeigt der Traceback beide - ohne Zutun und
+            # ohne Abhaengigkeit von Python 3.11.
             try:
                 self.restore(backup, tail, force=force_restore)
+
+                # Gegenprobe. 'applied_ranges()' protokolliert das Ergebnis
+                # nur, weil es einen RangeReport herausgibt, in dem der
+                # Aufrufer danach nachsehen kann. Hier gibt es kein solches
+                # Objekt - dieser Kontextmanager liefert die ItemTable. Eine
+                # bloss protokollierte Abweichung waere deshalb wieder
+                # unbemerkbar, also dieselbe Falle eine Ebene tiefer. Sie wird
+                # gemeldet.
+                problems = self.verify(backup)
+                if problems:
+                    for problem in problems:
+                        _log.error("Restore-Kontrolle: %s", problem)
+                    raise WTError(
+                        f"{len(problems)} Abweichung(en) nach der Wiederherstellung "
+                        "der Item-Tabelle"
+                    )
+                _log.info("Restore-Kontrolle: Ausgangszustand exakt wiederhergestellt")
+
             except WTError as error:
                 location = backup_file if backup_file is not None else "nicht gesichert"
                 _log.error(
@@ -326,6 +363,7 @@ class ItemAccess:
                     error,
                     location,
                 )
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -488,11 +526,32 @@ class WT3000:
         elif self._config.use_remote:
             _log.info("Nur-Lesen-Sitzung: ':COMMunicate:REMote ON' wird nicht gesendet")
 
-        # ROADMAP M1-1: die bisher manuelle Verdrahtung
-        # sigma_members_from_units(cfg.get_wiring_units()) passiert hier -
-        # einmalig, beim Verbinden, fuer alle Fachobjekte gemeinsam.
-        self._device = DeviceInfo.read(self._session)
-        self._device.log_summary()
+        # UEBERARBEITET (P-1, siehe PLAN_BEFUNDE_2026-08-19.md): ab hier laeuft
+        # der Rest des Konstruktors unter Aufraeumschutz.
+        #
+        # Vorher stand DeviceInfo.read() ungeschuetzt hinter enable_remote().
+        # Scheiterte eine der dortigen Pflichtabfragen - ':INPut:WIRing?' oder
+        # ':INPut:MODUle?' -, verliess die Ausnahme den Konstruktor, ohne dass
+        # ':COMMunicate:REMote OFF' je gesendet wurde: das Bedienfeld blieb
+        # gesperrt zurueck. close() konnte das nicht auffangen, weil bei einem
+        # gescheiterten Konstruktor gar kein Objekt entsteht, an dem close()
+        # aufrufbar waere.
+        #
+        # Die Reparatur sitzt bewusst HIER und nicht in from_config(): nur so
+        # sind alle drei Wege abgedeckt - from_config(), from_transport() und
+        # die direkte Konstruktion. from_transport() raeumte bisher gar nicht
+        # auf, weil es den Transport nicht besitzt.
+        try:
+            # ROADMAP M1-1: die bisher manuelle Verdrahtung
+            # sigma_members_from_units(cfg.get_wiring_units()) passiert hier -
+            # einmalig, beim Verbinden, fuer alle Fachobjekte gemeinsam.
+            self._device = DeviceInfo.read(self._session)
+            self._device.log_summary()
+        except BaseException:
+            # Auch bei Strg+C waehrend des Verbindungsaufbaus: das Bedienfeld
+            # gehoert freigegeben.
+            self._release_remote_after_failure()
+            raise
 
         self._input: InputConfig | None = None
         self._ranges: RangeAccess | None = None
@@ -548,8 +607,17 @@ class WT3000:
         except BaseException:
             # Der Transport steht schon, die Sitzung ist aber nicht zustande
             # gekommen (z.B. weil ':INPut:WIRing?' nicht antwortet). Ohne
-            # dieses except bliebe die Verbindung offen und das Geraet je nach
-            # Zeitpunkt in Fernsteuerung stehen.
+            # dieses except bliebe die Verbindung offen.
+            #
+            # UEBERARBEITET (P-1, siehe PLAN_BEFUNDE_2026-08-19.md): Der
+            # Kommentar behauptete hier zusaetzlich, dieser Block verhindere
+            # auch, dass das Geraet in Fernsteuerung stehen bleibt. Das hat er
+            # nie getan - ein 'REMote OFF' kam an dieser Stelle nicht vor, und
+            # nach transport.close() waere es ohnehin ins Leere gegangen.
+            # Zustaendig ist jetzt der Konstruktor selbst; er schaltet die
+            # Fernsteuerung ab, BEVOR die Ausnahme hier ankommt. Dieser Block
+            # kuemmert sich nur noch um den Transport, den nur dieser Weg
+            # besitzt.
             transport.close()
             raise
 
@@ -718,6 +786,32 @@ class WT3000:
     def _require_open(self) -> None:
         if self._closed:
             raise WTError("Diese WT3000-Sitzung ist bereits geschlossen")
+
+    # UEBERARBEITET (P-1, siehe PLAN_BEFUNDE_2026-08-19.md): Gegenstueck zu
+    # close() fuer den Fall, dass der Konstruktor nicht durchlaeuft.
+    def _release_remote_after_failure(self) -> None:
+        """Fernsteuerung zuruecknehmen, wenn der Verbindungsaufbau scheitert.
+
+        Raeumt ausschliesslich das ab, was der Konstruktor selbst angerichtet
+        hat - also ':COMMunicate:REMote ON'. Der Transport wird hier bewusst
+        NICHT geschlossen: wer ihn erzeugt hat, schliesst ihn auch. Fuer
+        from_config() ist das die Fassade selbst, fuer from_transport() der
+        Aufrufer.
+
+        disable_remote() ist fuer diesen Einsatz bereits richtig gebaut: es
+        prueft '_remote_active', sendet also nichts, wenn nie eingeschaltet
+        wurde, und faengt WTError selbst ab.
+        """
+        try:
+            self._session.disable_remote()
+        except Exception as error:  # bewusst breit
+            # Ein Fehler beim Aufraeumen darf die eigentliche Ursache niemals
+            # verdecken - deshalb nur protokollieren, nicht ausloesen.
+            _log.error(
+                "REMote OFF nach fehlgeschlagenem Verbindungsaufbau misslungen: %s - "
+                "Bedienfeld ggf. am Geraet ueber die LOCAL-Taste freigeben",
+                error,
+            )
 
     def close(self) -> None:
         """Sauber trennen. Mehrfachaufruf ist unschaedlich.

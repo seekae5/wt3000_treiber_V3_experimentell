@@ -146,6 +146,11 @@ with wt.applied_ranges(plan, backup_file=Path("konfiguration/backup.json")) as r
 
 Für die Item-Tabelle heißt dasselbe `wt.items.applied(specs)`.
 
+Misslingt die Wiederherstellung, kommt das als Ausnahme heraus und nicht nur ins
+Protokoll. Ein Block, den man ohne Fehler verlässt, hat den Ausgangszustand also
+tatsächlich zurückgestellt — geprüft wird das nach dem Zurückschreiben durch eine
+Gegenprobe am Gerät.
+
 ---
 
 ## Aufbau

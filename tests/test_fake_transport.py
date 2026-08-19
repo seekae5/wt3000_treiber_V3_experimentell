@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timezone  # NEU (P-3)
 
 import pytest
 
@@ -25,6 +26,7 @@ from wt3000_scpi.wt3000_core import (
     TmctlError,
     Transport,
     WTConfig,
+    WTError,  # NEU (P-3)
     WTSession,
 )
 from wt3000_scpi.wt3000_measure import CsvRecorder, run_measurement_loop, write_metadata
@@ -32,8 +34,10 @@ from wt3000_scpi.wt3000_numeric import (
     FLOAT_NO_DATA,
     FLOAT_OVERRANGE,
     ItemTable,
+    NumericValue,  # NEU (P-3)
     ValueStatus,
     parse_float_block,
+    read_numeric_values,  # NEU (P-3)
 )
 from wt3000_scpi.wt3000_transport import FakeTransport, TmctlTransport, float_block
 
@@ -155,6 +159,65 @@ def test_antwort_ohne_blockheader_wird_als_protokollfehler_gemeldet():
     _, sess = session({":NUMeric:NORMal:VALue?": "1.234E+00"})
     with pytest.raises(ProtocolError, match="Kein Blockheader"):
         sess.query_block(":NUMeric:NORMal:VALue?")
+
+
+# ---------------------------------------------------------------------------
+# NEU (P-4, siehe PLAN_BEFUNDE_2026-08-19.md): der Blockheader vollstaendig.
+#
+# Bisher war nur die Ziffernanzahl abgesichert. Das Laengenfeld stand
+# ungeschuetzt - eine abgerissene oder verstuemmelte Antwort kam als nackter
+# ValueError heraus, an dem jedes 'except WTError' vorbeilaeuft. Die
+# Stufenskripte fangen genau nur WTError.
+#
+# Jeder Fall hier muss ein ProtocolError sein, keiner ein ValueError.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "antwort,was",
+    [
+        (b"#", "Ziffernanzahl fehlt"),
+        (b"#X0012", "Ziffernanzahl ist keine Zahl"),
+        (b"#0", "unbestimmte Laenge"),
+        (b"#4", "Laengenfeld fehlt ganz"),
+        (b"#412", "Laengenfeld abgeschnitten"),
+        (b"#4AB12", "Laengenfeld ist keine Zahl"),
+        (b"#4-100" + b"\x00" * 8, "negative Laenge"),
+        (b"#9999999999" + b"\x00" * 8, "unplausibel grosse Laenge"),
+    ],
+    ids=lambda v: v if isinstance(v, str) else "",
+)
+def test_kaputter_blockheader_kommt_als_protokollfehler(antwort, was):
+    _transport, sess = session({":NUMeric:NORMal:VALue?": antwort})
+    with pytest.raises(ProtocolError):
+        sess.query_block(":NUMeric:NORMal:VALue?")
+
+
+def test_negative_laenge_liefert_keinen_still_gekuerzten_block():
+    """Der unangenehmste der Faelle: '#4-100' sieht wie ein Ergebnis aus.
+
+    'payload[:-100]' wuerde am ENDE schneiden statt am Anfang - die
+    Nachlese-Schleife laeuft gar nicht erst an, und heraus kaeme ein
+    stillschweigend zu kurzer Block ohne jeden Hinweis.
+    """
+    _transport, sess = session({":NUMeric:NORMal:VALue?": b"#4-100" + b"\x01" * 40})
+    with pytest.raises(ProtocolError, match="Unplausible Nutzlastlaenge"):
+        sess.query_block(":NUMeric:NORMal:VALue?")
+
+
+def test_zu_grosse_laenge_nennt_den_kopf_und_nicht_die_leitung():
+    """Ohne die Vorpruefung meldete das Geraet '64 Lesevorgaenge' - falsche Spur."""
+    _transport, sess = session({":NUMeric:NORMal:VALue?": b"#9999999999" + b"\x01" * 8})
+    with pytest.raises(ProtocolError, match="Unplausible Nutzlastlaenge") as fehler:
+        sess.query_block(":NUMeric:NORMal:VALue?")
+    assert "Lesevorgaengen" in str(fehler.value)  # nennt die Grenze, nicht den Abbruch
+
+
+def test_gueltiger_block_bleibt_unberuehrt():
+    """Gegenprobe: die zusaetzlichen Pruefungen duerfen den Regelfall nicht stoeren."""
+    _transport, sess = session({":NUMeric:NORMal:VALue?": float_block([1.0, 2.0, 3.0])})
+    werte = parse_float_block(sess.query_block(":NUMeric:NORMal:VALue?"))
+    assert [v.value for v in werte] == [1.0, 2.0, 3.0]
 
 
 def test_sentinel_bitmuster_ueberleben_den_transport():
@@ -305,6 +368,127 @@ def test_vollstaendige_messschleife_bis_in_die_csv(tmp_path):
     assert zweite[6] == "INF"
     assert zweite[-1] == "I1=NO_DATA;P1=OVERRANGE"
     assert zweite[3] == "16"
+
+
+# ---------------------------------------------------------------------------
+# NEU (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): die CSV-Zeile gegen den Kopf.
+#
+# Der teuerste Fehler dieser Codebasis waere eine stillschweigend verrutschte
+# Spalte: jede Zeile sieht fuer sich plausibel aus, die Verschiebung zeigt sich
+# erst im Vergleich mit dem Kopf - meist erst bei der Auswertung.
+# ---------------------------------------------------------------------------
+
+
+def messwerte(anzahl: int) -> list[NumericValue]:
+    """Eine Liste gueltiger Messwerte gewuenschter Laenge."""
+    return [NumericValue(float(i), ValueStatus.OK, 0) for i in range(1, anzahl + 1)]
+
+
+def test_zu_wenige_werte_werden_nicht_geschrieben(tmp_path):
+    """P-3: sonst rutscht 'status_flags' unter eine Messwertspalte."""
+    ziel = tmp_path / "kurz.csv"
+    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+        with pytest.raises(WTError, match="Sample 1"):
+            recorder.write_row(
+                timestamp=datetime.now(timezone.utc),
+                elapsed_s=0.0,
+                sample=1,
+                condition=None,
+                values=messwerte(2),
+            )
+
+    # Nur der Kopf steht in der Datei - keine halbe Zeile.
+    zeilen = list(csv.reader(ziel.open(encoding="utf-8")))
+    assert len(zeilen) == 1
+    assert zeilen[0][-1] == "status_flags"
+
+
+def test_zu_viele_werte_werden_nicht_geschrieben(tmp_path):
+    """Der Gegenfall: sonst entstehen unbenannte Spalten hinter 'status_flags'."""
+    ziel = tmp_path / "lang.csv"
+    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+        with pytest.raises(WTError, match="4 Messwerte"):
+            recorder.write_row(
+                timestamp=datetime.now(timezone.utc),
+                elapsed_s=0.0,
+                sample=7,
+                condition=None,
+                values=messwerte(4),
+            )
+
+    assert len(list(csv.reader(ziel.open(encoding="utf-8")))) == 1
+
+
+def test_passende_anzahl_wird_unveraendert_geschrieben(tmp_path):
+    """Gegenprobe: die Pruefung darf den Regelfall nicht behindern."""
+    ziel = tmp_path / "passend.csv"
+    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+        recorder.write_row(
+            timestamp=datetime.now(timezone.utc),
+            elapsed_s=1.5,
+            sample=1,
+            condition=16,
+            values=messwerte(3),
+        )
+
+    kopf, zeile = list(csv.reader(ziel.open(encoding="utf-8")))
+    assert len(zeile) == len(kopf)
+    assert zeile[3] == "16"
+    assert zeile[-1] == ""  # keine Statusflags, alle Werte OK
+
+
+# ---------------------------------------------------------------------------
+# NEU (P-3): abweichende Werteanzahl faellt schon beim Lesen auf
+# ---------------------------------------------------------------------------
+
+
+def test_abweichende_werteanzahl_bricht_beim_lesen_ab():
+    """Eine Abfrage frueher als in der CSV - dort ist die Ursache noch sichtbar."""
+    _transport, sess = session({":NUMeric:NORMal:VALue?": float_block([1.0, 2.0])})
+    with pytest.raises(ProtocolError, match="Erwartet: 4"):
+        read_numeric_values(sess, expected_count=4)
+
+
+def test_strict_false_liefert_die_werte_mit_warnung(caplog):
+    """Diagnoseweg: wer nachsehen will, was das Geraet liefert, kommt heran."""
+    _transport, sess = session({":NUMeric:NORMal:VALue?": float_block([1.0, 2.0])})
+    with caplog.at_level("WARNING"):
+        werte = read_numeric_values(sess, expected_count=4, strict=False)
+    assert len(werte) == 2
+    assert any("Erwartet" in r.message for r in caplog.records)
+
+
+def test_passende_anzahl_geht_ohne_beanstandung_durch():
+    _transport, sess = session({":NUMeric:NORMal:VALue?": float_block([1.0, 2.0])})
+    assert len(read_numeric_values(sess, expected_count=2)) == 2
+
+
+def test_messschleife_bricht_bei_verschobener_item_tabelle_ab(tmp_path):
+    """Der Fall aus der Praxis: jemand stellt am Bedienfeld die Tabelle um.
+
+    Die Schleife laeuft dann nicht mit falsch beschrifteten Spalten weiter,
+    sondern bricht ab - und HOLD wird trotzdem abgeschaltet.
+    """
+    antworten = messschleifen_antworten(1)
+    antworten[":NUMeric:NORMal:VALue?"] = float_block([1.0, 2.0])  # statt vier Werten
+    transport, sess = session(antworten)
+    tabelle = ItemTable.read_from_device(sess)
+
+    with CsvRecorder(tmp_path / "abbruch.csv", [it.key for it in tabelle.items]) as recorder:
+        with pytest.raises(ProtocolError):
+            run_measurement_loop(
+                session=sess,
+                table=tabelle,
+                recorder=recorder,
+                interval_s=0.0,
+                max_samples=1,
+                max_duration_s=None,
+                use_hold=True,
+                record_condition=False,
+                log_every=0,
+            )
+
+    assert transport.written[-1] == ":NUMeric:HOLD OFF"
 
 
 def test_hold_wird_auch_bei_einem_fehler_mitten_im_zyklus_abgeschaltet():

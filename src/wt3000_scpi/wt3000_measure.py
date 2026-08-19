@@ -159,7 +159,33 @@ class CsvRecorder:
         condition: int | None,
         values: list[NumericValue],
     ) -> None:
-        """Eine Messzeile schreiben und sofort flushen."""
+        """Eine Messzeile schreiben und sofort flushen.
+
+        UEBERARBEITET (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): Die Zeile wird
+        gegen den Spaltenkopf geprueft, bevor irgendetwas geschrieben wird.
+        Passt die Anzahl nicht, bricht der Vorgang ab.
+
+        Bisher entstand die Zeile aus vier festen Feldern, 'len(values)'
+        Wertzellen und der Flag-Spalte - ohne jeden Abgleich mit dem Kopf. Bei
+        zu wenigen Werten rutschte 'status_flags' unter eine Messwertspalte,
+        bei zu vielen entstanden unbenannte Spalten. Beides sieht man der
+        fertigen Datei nicht an, weil jede Zeile fuer sich plausibel bleibt -
+        die Verschiebung zeigt sich erst im Vergleich mit dem Kopf, und dann
+        meist Wochen spaeter bei der Auswertung.
+
+        Abbruch statt Auffuellen ist Absicht: eine abweichende Werteanzahl
+        heisst, dass die Item-Tabelle nicht mehr die ist, gegen die der Kopf
+        geschrieben wurde. Aufgefuellte Zeilen waeren dann inhaltlich falsch,
+        nicht bloss unvollstaendig - und niemand wuerde es der Datei ansehen.
+        """
+        if len(values) != len(self._columns):
+            raise WTError(
+                f"Sample {sample}: {len(values)} Messwerte passen nicht zu "
+                f"{len(self._columns)} Wertspalten der Datei {self._path.name}. "
+                "Die Zeile wird nicht geschrieben, weil sie sonst gegen den "
+                "Spaltenkopf verrutschen wuerde."
+            )
+
         flags = [
             f"{name}={value.status.value}"
             for name, value in zip(self._columns, values)

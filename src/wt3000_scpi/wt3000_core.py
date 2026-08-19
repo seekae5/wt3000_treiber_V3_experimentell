@@ -55,6 +55,7 @@ __all__ = [
     "WTConfig",
     "WTError",
     # hier beheimatet (Layer 1)
+    "MAX_BLOCK_READS",  # NEU (P-4)
     "DeviceError",
     "ReadOnlyViolation",
     "WTSession",
@@ -67,6 +68,14 @@ __all__ = [
 # wt3000_transport gewandert - sie entstehen im Transport. Die beiden
 # folgenden Klassen entstehen erst hier und bleiben deshalb hier.
 # ---------------------------------------------------------------------------
+
+
+# UEBERARBEITET (P-4, siehe PLAN_BEFUNDE_2026-08-19.md): war eine nackte 64 in
+# der Nachlese-Schleife von _assemble_block(). Der Wert wird jetzt an zwei
+# Stellen gebraucht - fuer die Schleifengrenze und, mit der Puffergroesse
+# multipliziert, fuer die groesste Nutzlast, die ueberhaupt zusammengesetzt
+# werden kann.
+MAX_BLOCK_READS: int = 64
 
 
 class DeviceError(WTError):
@@ -150,7 +159,19 @@ class WTSession:
         return self._assemble_block(raw)
 
     def _assemble_block(self, raw: bytes) -> bytes:
-        """'#4NNNN<daten>' auswerten und die Nutzlast vollstaendig einsammeln."""
+        """'#4NNNN<daten>' auswerten und die Nutzlast vollstaendig einsammeln.
+
+        UEBERARBEITET (P-4, siehe PLAN_BEFUNDE_2026-08-19.md): Der Kopf wird
+        jetzt vollstaendig geprueft. Bisher war nur die Ziffernanzahl
+        abgesichert; die Umwandlung des Laengenfelds stand ungeschuetzt und
+        konnte einen nackten ValueError herauslassen - etwa bei einer nach dem
+        Kopf abgerissenen Antwort ('#4') oder einem nichtnumerischen Feld.
+        Aufrufer, die pflichtgemaess nur WTError behandeln, liefen dann daran
+        vorbei; genau die Stufenskripte tun das.
+
+        Ab jetzt gilt: jeder Formfehler einer Blockantwort verlaesst diese
+        Methode als ProtocolError.
+        """
         if not raw.startswith(b"#"):
             raise ProtocolError(
                 f"Kein Blockheader in der Antwort (erste Bytes: {raw[:16]!r}). "
@@ -164,15 +185,59 @@ class WTSession:
             raise ProtocolError("Block mit unbestimmter Laenge ('#0') wird nicht unterstuetzt")
 
         header_length = 2 + digit_count
-        payload_length = int(raw[2:header_length])
+
+        # UEBERARBEITET (P-4): abgeschnittener Kopf. Ohne diese Pruefung liefert
+        # der Schnitt unten stillschweigend zu wenige oder gar keine Bytes, und
+        # int() bricht mit einem ValueError ab, den niemand faengt.
+        if len(raw) < header_length:
+            raise ProtocolError(
+                f"Blockheader abgeschnitten: angekuendigt sind {digit_count} "
+                f"Laengenziffern, die Antwort hat aber nur {len(raw)} Bytes "
+                f"({raw[:16]!r})"
+            )
+
+        # UEBERARBEITET (P-4): dieselbe Absicherung wie oben fuer die
+        # Ziffernanzahl - Meldung nach demselben Muster, mit den ersten Bytes.
+        try:
+            payload_length = int(raw[2:header_length])
+        except ValueError as exc:
+            raise ProtocolError(
+                f"Laengenfeld des Blockheaders ist keine Zahl: "
+                f"{raw[2:header_length]!r} (Kopf: {raw[:header_length]!r})"
+            ) from exc
+
+        # UEBERARBEITET (P-4): unplausible Laengen abfangen, BEVOR die
+        # Nachlese-Schleife laeuft.
+        #
+        # Negativ: 'payload[:payload_length]' wuerde am Ende schneiden statt am
+        # Anfang - die Schleife laeuft gar nicht erst an, und heraus kaeme
+        # stillschweigend ein zu kurzer Block. Das ist der unangenehmere der
+        # beiden Faelle, weil er wie ein Ergebnis aussieht.
+        #
+        # Zu gross: die Schleife wuerde 64-mal ins Leere lesen und dann
+        # 'nach 64 Lesevorgaengen immer noch unvollstaendig' melden - eine
+        # Meldung, die auf eine langsame Verbindung deutet statt auf den
+        # kaputten Kopf, der die eigentliche Ursache ist.
+        max_payload = MAX_BLOCK_READS * self._config.read_buffer_size
+        if not 0 <= payload_length <= max_payload:
+            raise ProtocolError(
+                f"Unplausible Nutzlastlaenge im Blockheader: {payload_length} Bytes "
+                f"(Kopf: {raw[:header_length]!r}). Zulaessig sind 0 bis {max_payload} "
+                f"Bytes - mehr liesse sich in {MAX_BLOCK_READS} Lesevorgaengen "
+                "ohnehin nicht einsammeln."
+            )
+
         payload = raw[header_length:]
 
         reads = 1
         while len(payload) < payload_length:
             payload += self._transport.read()
             reads += 1
-            if reads > 64:
-                raise ProtocolError("Blockdaten nach 64 Lesevorgaengen immer noch unvollstaendig")
+            if reads > MAX_BLOCK_READS:
+                raise ProtocolError(
+                    f"Blockdaten nach {MAX_BLOCK_READS} Lesevorgaengen immer noch "
+                    f"unvollstaendig ({len(payload)} von {payload_length} Bytes)"
+                )
         if reads > 1:
             self._log.info("Blockdaten in %d Lesevorgaengen zusammengesetzt", reads)
 

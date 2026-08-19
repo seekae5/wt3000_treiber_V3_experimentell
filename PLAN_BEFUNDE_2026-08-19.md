@@ -14,15 +14,15 @@ Beschreibung. Es wurde kein Code geändert.
 
 | Nr. | Befund | Prüfergebnis | Priorität nach Prüfung | Maßnahme |
 |-----|--------|--------------|------------------------|----------|
-| BF-H1 | REMOTE bleibt nach fehlgeschlagener Initialisierung aktiv | **bestätigt, verschärft** | **hoch** | [P-1](#p-1) |
-| BF-H2 | Restore-Fehler der Item-Tabelle wird unterdrückt | **bestätigt** | **hoch** | [P-2](#p-2) |
-| BF-H3 | Abweichende Messwertanzahl verschiebt die CSV-Struktur | **bestätigt** | **hoch** | [P-3](#p-3) |
+| BF-H1 | REMOTE bleibt nach fehlgeschlagener Initialisierung aktiv | **bestätigt, verschärft** | **hoch** | [P-1](#p-1) ✅ umgesetzt |
+| BF-H2 | Restore-Fehler der Item-Tabelle wird unterdrückt | **bestätigt** | **hoch** | [P-2](#p-2) ✅ umgesetzt |
+| BF-H3 | Abweichende Messwertanzahl verschiebt die CSV-Struktur | **bestätigt** | **hoch** | [P-3](#p-3) ✅ umgesetzt |
 | BF-H4 | Schreibende Voreinstellung in Stufe 5b | bestätigt, aber **Zielrichtung falsch** | mittel | [P-5](#p-5) |
 | BF-M1 | Keine reproduzierbare Installation, keine README | **überwiegend falsch** | niedrig (Restanteil) | [P-8](#p-8) |
 | BF-M2 | Verbindungsdaten als Quellcode-Defaults | **bestätigt** | mittel | [P-7](#p-7) |
-| BF-M3 | Blockheader-Fehler nicht einheitlich übersetzt | **bestätigt** | mittel | [P-4](#p-4) |
+| BF-M3 | Blockheader-Fehler nicht einheitlich übersetzt | **bestätigt** | mittel | [P-4](#p-4) ✅ umgesetzt |
 | BF-N1 | Doku und Implementierung auseinandergelaufen | **teils überholt**, teils Dublette | niedrig | [P-8](#p-8) |
-| Z-1 | *(fehlt in Befund.md)* `from_transport()` hat dieselbe REMOTE-Lücke | neu | **hoch** | [P-1](#p-1) |
+| Z-1 | *(fehlt in Befund.md)* `from_transport()` hat dieselbe REMOTE-Lücke | neu | **hoch** | [P-1](#p-1) ✅ umgesetzt |
 | Z-2 | *(fehlt in Befund.md)* schreibendes Geräteskript liegt in `tests/` | neu | mittel | [P-6](#p-6) |
 
 **Kurzurteil:** Sechs von acht Befunden treffen zu, drei davon sind ernst und
@@ -230,13 +230,21 @@ Selbe Kategorie wie BF-H4: etwas, das nach „harmlos" aussieht, schreibt.
 Vier Pakete, absteigend nach Dringlichkeit. Innerhalb eines Pakets sind die Punkte
 unabhängig voneinander und in beliebiger Reihenfolge machbar.
 
-### Paket A — Garantien einhalten (zusammen etwa ein Arbeitstag)
+### Paket A — Garantien einhalten (zusammen etwa ein Arbeitstag) — ✅ ABGESCHLOSSEN 2026-08-19
+
+> P-1 bis P-4 sind umgesetzt. Testsuite von 176 auf 204 Fälle, weiterhin ohne
+> Gerät und ohne `tmctl.dll`; für jeden Befund existiert ein Test, der ohne die
+> Korrektur fehlschlägt. Änderungsdokumente:
+> [P-1](AENDERUNGEN_2026-08-19_P-1.md) · [P-2](AENDERUNGEN_2026-08-19_P-2.md) ·
+> [P-3](AENDERUNGEN_2026-08-19_P-3.md) · [P-4](AENDERUNGEN_2026-08-19_P-4.md)
 
 Alle vier Punkte betreffen Zusagen, die der Code im Docstring gibt und im
 Fehlerfall nicht hält. Klein im Umfang, hoch in der Wirkung.
 
 #### P-1
 **BF-H1 + Z-1 — REMOTE beim gescheiterten Verbindungsaufbau abschalten** · `0,5 Tag` · Risiko gering
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-1.md](AENDERUNGEN_2026-08-19_P-1.md).
+> 182 Tests grün (6 neue), Gegenprobe durchgeführt: ohne die Korrektur fallen drei davon durch.
 
 Ziel: Nach einem misslungenen Verbindungsaufbau bleibt das Bedienfeld bedienbar —
 unabhängig davon, über welchen der drei Wege konstruiert wurde.
@@ -274,6 +282,10 @@ Prüfung (gerätefrei über `FakeTransport`):
 
 #### P-2
 **BF-H2 — Restore-Fehler der Item-Tabelle weiterreichen** · `0,5 Tag` · Risiko gering
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-2.md](AENDERUNGEN_2026-08-19_P-2.md).
+> 186 Tests grün (4 neue), Gegenprobe durchgeführt: ohne die Korrektur fallen alle vier durch.
+> Abweichung vom Plantext: die Gegenprobe nach dem Restore meldet Abweichungen als
+> Fehler statt sie nur zu protokollieren — begründet im Änderungsdokument, Abschnitt 2.2.
 
 Ziel: `ItemAccess.applied()` verhält sich im Fehlerfall wie `applied_ranges()`.
 Wer den Kontextmanager ohne Ausnahme verlässt, darf sich darauf verlassen, dass
@@ -309,6 +321,10 @@ Prüfung:
 
 #### P-3
 **BF-H3 — CSV-Zeile gegen den Kopf absichern** · `0,5 Tag` · Risiko gering
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-3.md](AENDERUNGEN_2026-08-19_P-3.md).
+> 193 Tests grün (7 neue), Gegenprobe durchgeführt: ohne die Korrektur fallen vier davon durch.
+> Umgesetzt wie geplant, einschließlich `strict`-Schalter und der Trennung
+> Datenpfad (Abbruch) gegen Diagnose (`map_values()` bleibt bei der Warnung).
 
 Ziel: Eine Messdatei enthält entweder Zeilen, deren Spalten zum Kopf passen, oder
 sie bricht ab. Kein dritter Fall.
@@ -344,6 +360,9 @@ Prüfung:
 
 #### P-4
 **BF-M3 — Blockheader vollständig validieren** · `0,25 Tag` · Risiko sehr gering
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-4.md](AENDERUNGEN_2026-08-19_P-4.md).
+> 204 Tests grün (11 neue), Gegenprobe durchgeführt: ohne die Korrektur fallen sieben davon durch.
+> **Paket A ist damit abgeschlossen.**
 
 Ziel: Jeder Formfehler in einer Blockantwort verlässt `_assemble_block()` als
 `ProtocolError`.

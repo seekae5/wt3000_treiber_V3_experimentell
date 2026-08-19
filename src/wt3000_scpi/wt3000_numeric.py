@@ -237,6 +237,20 @@ class ItemTable:
         Doppelte Schluessel (die Tabelle enthaelt z.B. FU,1 zweimal) bekommen
         das Suffix '#2', '#3' usw. Die geordnete Liste bleibt ueber
         zip(table.items, values) jederzeit verfuegbar.
+
+        UEBERARBEITET (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): Eine abweichende
+        Anzahl bleibt hier bewusst eine WARNUNG - anders als in
+        read_numeric_values() und CsvRecorder.write_row(), die seit P-3 hart
+        abbrechen.
+
+        Die Trennung ist Absicht. Diese Methode ist eine Bequemlichkeit fuer
+        Anzeige und Diagnose: sie liefert ein Dictionary zum Nachschlagen, und
+        wer nachschlaegt, merkt einen fehlenden Schluessel sofort. Sie liegt
+        nicht im Datenpfad einer Messreihe - dort steht die geordnete Liste,
+        und genau die ist gegen Verrutschen abgesichert. Ein Abbruch hier
+        wuerde die Diagnose gerade dann unmoeglich machen, wenn man sie
+        braucht: naemlich um nachzusehen, welche Items ueberhaupt geliefert
+        wurden.
         """
         if len(values) != len(self.items):
             _log.warning(
@@ -282,10 +296,41 @@ def parse_float_block(payload: bytes) -> list[NumericValue]:
     return values
 
 
-def read_numeric_values(session: WTSession, expected_count: int | None = None) -> list[NumericValue]:
-    """':NUMeric:NORMal:VALue?' im FLOat-Format lesen und parsen."""
+def read_numeric_values(
+    session: WTSession,
+    expected_count: int | None = None,
+    strict: bool = True,  # UEBERARBEITET (P-3)
+) -> list[NumericValue]:
+    """':NUMeric:NORMal:VALue?' im FLOat-Format lesen und parsen.
+
+    UEBERARBEITET (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): Eine von
+    'expected_count' abweichende Werteanzahl ist ab jetzt ein Fehler, keine
+    Warnung mehr.
+
+    Der Grund liegt eine Schicht hoeher: der Spaltenkopf der CSV entsteht aus
+    der Item-Tabelle, die Datenzeilen aus dieser Liste. Weichen die Laengen
+    voneinander ab, verrutschen die Spalten gegeneinander - und zwar so, dass
+    jede Zeile fuer sich plausibel aussieht. Die Abweichung faellt hier auf,
+    eine Abfrage frueher als in der Datei.
+
+    Eine abweichende Anzahl bedeutet immer, dass die Item-Tabelle im Geraet
+    nicht mehr die ist, gegen die der Aufrufer plant - typischerweise, weil
+    jemand am Bedienfeld etwas umgestellt hat. Weitermessen waere dann kein
+    Notbetrieb, sondern das Erzeugen falsch beschrifteter Messdaten.
+
+    strict=False stellt die alte Warnung wieder her. Gedacht fuer Diagnose,
+    nicht fuer Messlaeufe.
+    """
     payload = session.query_block(":NUMeric:NORMal:VALue?")
     values = parse_float_block(payload)
     if expected_count is not None and len(values) != expected_count:
+        if strict:
+            raise ProtocolError(
+                f"Erwartet: {expected_count} Werte, erhalten: {len(values)}. "
+                "Die Item-Tabelle im Geraet passt nicht zur erwarteten - wurde sie "
+                "am Bedienfeld oder von einer zweiten Sitzung veraendert? "
+                "(strict=False liefert die Werte trotzdem, dann aber ohne "
+                "verlaessliche Spaltenzuordnung.)"
+            )
         _log.warning("Erwartet: %d Werte, erhalten: %d", expected_count, len(values))
     return values

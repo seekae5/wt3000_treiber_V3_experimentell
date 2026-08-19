@@ -160,9 +160,19 @@ def test_doppelte_schluessel_bekommen_ein_suffix():
 def test_zu_wenige_werte_werden_gemeldet(caplog):
     """NUMERIC-1: zip() kuerzt still, die Warnung ist der einzige Hinweis.
 
-    Der Test haelt das dokumentierte Verhalten fest. Wird die Fundstelle
-    NUMERIC-1 spaeter auf einen harten Abbruch umgestellt, schlaegt genau
-    dieser Test an und zeigt, wo die Entscheidung liegt.
+    UEBERARBEITET (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): Dieser Test war als
+    Anschlagpunkt fuer die Entscheidung angelegt, ob NUMERIC-1 auf einen harten
+    Abbruch umgestellt wird. Die Entscheidung ist gefallen - und zwar
+    differenziert:
+
+      * read_numeric_values() und CsvRecorder.write_row() brechen ab. Dort
+        entstehen die Messdaten, dort verrutschen sonst die Spalten.
+      * map_values() bleibt bei der Warnung. Es ist eine Bequemlichkeit fuer
+        Anzeige und Diagnose, kein Datenpfad; ein fehlender Schluessel faellt
+        beim Nachschlagen sofort auf.
+
+    Der Test bleibt deshalb unveraendert bestehen und haelt ab jetzt nicht mehr
+    eine offene Frage fest, sondern die getroffene Festlegung.
     """
     table = ItemTable.from_response("3;U,1;I,1;P,1")
     with caplog.at_level("WARNING"):
