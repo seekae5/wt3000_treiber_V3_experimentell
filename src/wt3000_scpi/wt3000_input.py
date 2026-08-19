@@ -30,6 +30,14 @@ from typing import Callable, Iterable, Iterator
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 from .wt3000_core import WTError, WTSession
 
+# NEU (M0-1, siehe ROADMAP.md): Die Parametersyntax der Bereichsknoten ist am
+# Geraet geklaert. Die reine NRf-Form ('1000') wird angenommen, die Formatierung
+# liegt ab jetzt nur noch an EINER Stelle - in wt3000_common.format_nrf().
+# wt3000_rangeio.py benutzt dieselbe Funktion bereits; damit ist Befund B-01
+# erledigt. Layer bleibt gewahrt: wt3000_common ist Layer 1, dieses Modul
+# Layer 2 (siehe LAYERS in tests/test_package_layout.py).
+from .wt3000_common import format_nrf
+
 _log = logging.getLogger("wt3000.input")
 
 
@@ -368,18 +376,33 @@ def _check_allowed(value: float, allowed: tuple[float, ...], what: str) -> float
 # ---------------------------------------------------------------------------
 
 
-def format_voltage(volts: float) -> str:
-    """Spannungsangabe fuer das Geraet ('1000V', '7.5V')."""
-    return f"{volts:g}V"
+# UEBERARBEITET (M0-1, siehe ROADMAP.md): format_voltage() und format_current()
+# sind entfallen. Am Geraet wurde geprueft, dass der Bereichsknoten die reine
+# NRf-Form annimmt (Element 4, Direkteingang, ':INPut:VOLTage:RANGe:ELEMent4 1000'
+# gesetzt und identisch zurueckgelesen). Damit gab es zwei Schreibweisen fuer
+# denselben Knoten - dieses Modul haengte eine Einheit an, wt3000_rangeio.py
+# sendete NRf. Die Einheitenform wird ersatzlos aufgegeben, geformt wird nur
+# noch mit wt3000_common.format_nrf().
+#
+# Auskommentiert statt geloescht, bis der Geraetetermin auch den Sensor- und
+# den Direktstromknoten bestaetigt hat (ROADMAP M0-1, Spiegelstrich 2 und 3).
+# Danach ersatzlos entfernen.
+#
+# def format_voltage(volts: float) -> str:
+#     """Spannungsangabe fuer das Geraet ('1000V', '7.5V')."""
+#     return f"{volts:g}V"
+#
+#
+# def format_current(amps: float) -> str:
+#     """Stromangabe. Unter 1 A wird in mA formuliert (Schreibweise Handbuch)."""
+#     if amps < 1.0:
+#         return f"{amps * 1000.0:g}MA"
+#     return f"{amps:g}A"
 
 
-def format_current(amps: float) -> str:
-    """Stromangabe. Unter 1 A wird in mA formuliert (Schreibweise Handbuch)."""
-    if amps < 1.0:
-        return f"{amps * 1000.0:g}MA"
-    return f"{amps:g}A"
-
-
+# format_rate() bleibt: ':RATE' ist KEIN Bereichsknoten. Die Zeiteinheit
+# ('500MS' / '1S') gehoert dort zur Parametersyntax und ist von M0-1 nicht
+# beruehrt.
 def format_rate(seconds: float) -> str:
     """Update-Rate als Geraeteparameter ('500MS', '1S')."""
     if seconds < 1.0:
@@ -751,7 +774,9 @@ class InputConfig:
             GROUP_RANGE,
             _BASE_VOLT_RANGE,
             target,
-            format_voltage(value),
+            # UEBERARBEITET (M0-1): am Geraet belegte Form. Vorher:
+            # format_voltage(value),
+            format_nrf(value),  # NEU (M0-1): '1000' statt '1000V'
             lambda actual: _float_close(value, parse_float(actual)),
             "Spannungsbereich setzen",
         )
@@ -788,7 +813,13 @@ class InputConfig:
             GROUP_RANGE,
             _BASE_CURR_RANGE,
             target,
-            format_current(value),
+            # UEBERARBEITET (M0-1): derselbe Knoten, dieselbe Regel. Vorher:
+            # format_current(value),   # ergab '5A' bzw. '500MA'
+            # ZU VERIFIZIEREN: Am Geraet belegt ist bisher nur der
+            # Spannungsknoten. Fuer den Direktstrom steht die Gegenprobe
+            # ('5A' gegen '500MA' gegen '0.5') noch aus - ROADMAP M0-1.
+            # Die Rueckleseprobe in _write_element() faengt eine Ablehnung ab.
+            format_nrf(value),  # NEU (M0-1): Amperewert in reiner NRf-Form
             matches,
             "Strombereich setzen",
         )
@@ -807,7 +838,12 @@ class InputConfig:
             GROUP_RANGE,
             _BASE_CURR_RANGE,
             target,
-            f"EXTernal,{format_voltage(value)}",
+            # UEBERARBEITET (M0-1): identisch zu wt3000_rangeio.set_range(
+            # ..., sensor=True). Vorher:
+            # f"EXTernal,{format_voltage(value)}",
+            # ZU VERIFIZIEREN: 'EXTernal,10' gegen 'EXTernal,10V' ist am Geraet
+            # noch nicht gegengeprueft - ROADMAP M0-1, Spiegelstrich 2.
+            f"EXTernal,{format_nrf(value)}",  # NEU (M0-1)
             matches,
             "Sensorbereich setzen",
         )

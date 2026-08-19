@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import pytest
 
+# NEU (M0-1): die Formatierung der Bereichsparameter liegt jetzt in
+# wt3000_common. Der Import von format_voltage aus wt3000_input ist entfallen.
+from wt3000_scpi.wt3000_common import format_nrf
 from wt3000_scpi.wt3000_core import WTError
 from wt3000_scpi.wt3000_input import (
     VOLTAGE_RANGES,
     _check_allowed,
-    format_voltage,
+    # UEBERARBEITET (M0-1): format_voltage,
     parse_bool,
     parse_current_range,
     parse_float,
@@ -104,7 +107,23 @@ def test_crest_faktor_bestimmt_die_tabelle():
         _check_allowed(7.5, VOLTAGE_RANGES[3], "Spannungsbereich")
 
 
-def test_drahtformat_der_spannung():
-    """Drahtformat A (INPUT-9) - am Geraet noch ZU VERIFIZIEREN."""
-    assert format_voltage(1000.0) == "1000V"
-    assert format_voltage(7.5) == "7.5V"
+# UEBERARBEITET (M0-1, siehe ROADMAP.md): Der alte Test hielt die
+# Einheitenschreibweise fest, die am Geraet unterlegen war. Ersetzt durch den
+# Test darunter.
+#
+# def test_drahtformat_der_spannung():
+#     """Drahtformat A (INPUT-9) - am Geraet noch ZU VERIFIZIEREN."""
+#     assert format_voltage(1000.0) == "1000V"
+#     assert format_voltage(7.5) == "7.5V"
+
+
+# NEU (M0-1): haelt die am Geraet belegte Parametersyntax der Bereichsknoten
+# fest. Belegt ist ':INPut:VOLTage:RANGe:ELEMent4 1000' - gesetzt und
+# unveraendert zurueckgelesen. Faellt dieser Test, hat jemand die
+# Einheitenschreibweise wieder eingefuehrt.
+def test_drahtformat_der_bereiche_ist_reines_nrf():
+    assert format_nrf(1000.0) == "1000"
+    assert format_nrf(7.5) == "7.5"
+    assert format_nrf(0.5) == "0.5"
+    assert "V" not in format_nrf(1000.0)
+    assert "A" not in format_nrf(0.5)
