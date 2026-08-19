@@ -36,7 +36,7 @@ class WTConfig:
     # ZU VERIFIZIEREN: Ob das Geraet Set-Kommandos ueber Ethernet auch ohne
     # ':COMMunicate:REMote ON' annimmt. Falls Schreibzugriffe abgelehnt werden,
     # hier auf True setzen. Wird dann beim Beenden zwingend wieder abgeschaltet.
-    use_remote: bool = False
+    use_remote: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -346,4 +346,4 @@ class WTSession:
         entries = self.read_error_queue()
         problems = [e for e in entries if e.split(",", 1)[0].strip().lstrip("+") != "0"]
         if problems:
-            raise DeviceError(f"Geraetefehler nach '{context}': {problems}")
+            raise DeviceError(f"Geraetefehler nach '{context}': {problems}")
