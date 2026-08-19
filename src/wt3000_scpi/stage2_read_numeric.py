@@ -100,7 +100,9 @@ def log_reading(session: WTSession, table: ItemTable, cycle: int) -> Counter:
 
 def main() -> int:
     """Stufe 2 ausfuehren. Rueckgabewert 0 = erfolgreich."""
-    config = WTConfig()
+    # UEBERARBEITET (P-7): Verbindungsparameter aus der Auflaesungskette -
+    # WT3000_*-Umgebungsvariablen oder 'wt3000.json'. Siehe README.
+    config = WTConfig.from_environment()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = Path.cwd() / f"wt3000_stage2_{timestamp}.txt"
     backup_file = Path.cwd() / f"wt3000_itemtable_backup_{timestamp}.json"
@@ -182,4 +184,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main())

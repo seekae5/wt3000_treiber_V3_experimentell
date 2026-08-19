@@ -19,3 +19,7 @@ build/
 .idea/
 .vscode/
 .DS_Store
+
+# P-7: Verbindungsparameter dieses Rechners - Zugangsdaten gehoeren nicht in
+# die Versionsverwaltung. Vorlage: wt3000.example.json
+wt3000.json

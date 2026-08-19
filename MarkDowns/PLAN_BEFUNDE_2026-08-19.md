@@ -17,13 +17,13 @@ Beschreibung. Es wurde kein Code geändert.
 | BF-H1 | REMOTE bleibt nach fehlgeschlagener Initialisierung aktiv | **bestätigt, verschärft** | **hoch** | [P-1](#p-1) ✅ umgesetzt |
 | BF-H2 | Restore-Fehler der Item-Tabelle wird unterdrückt | **bestätigt** | **hoch** | [P-2](#p-2) ✅ umgesetzt |
 | BF-H3 | Abweichende Messwertanzahl verschiebt die CSV-Struktur | **bestätigt** | **hoch** | [P-3](#p-3) ✅ umgesetzt |
-| BF-H4 | Schreibende Voreinstellung in Stufe 5b | bestätigt, aber **Zielrichtung falsch** | mittel | [P-5](#p-5) |
-| BF-M1 | Keine reproduzierbare Installation, keine README | **überwiegend falsch** | niedrig (Restanteil) | [P-8](#p-8) |
-| BF-M2 | Verbindungsdaten als Quellcode-Defaults | **bestätigt** | mittel | [P-7](#p-7) |
+| BF-H4 | Schreibende Voreinstellung in Stufe 5b | bestätigt, aber **Zielrichtung falsch** | mittel | [P-5](#p-5) ✅ umgesetzt |
+| BF-M1 | Keine reproduzierbare Installation, keine README | **überwiegend falsch** | niedrig (Restanteil) | [P-8](#p-8) ✅ umgesetzt |
+| BF-M2 | Verbindungsdaten als Quellcode-Defaults | **bestätigt** | mittel | [P-7](#p-7) ✅ umgesetzt |
 | BF-M3 | Blockheader-Fehler nicht einheitlich übersetzt | **bestätigt** | mittel | [P-4](#p-4) ✅ umgesetzt |
-| BF-N1 | Doku und Implementierung auseinandergelaufen | **teils überholt**, teils Dublette | niedrig | [P-8](#p-8) |
+| BF-N1 | Doku und Implementierung auseinandergelaufen | **teils überholt**, teils Dublette | niedrig | [P-8](#p-8) ✅ umgesetzt |
 | Z-1 | *(fehlt in Befund.md)* `from_transport()` hat dieselbe REMOTE-Lücke | neu | **hoch** | [P-1](#p-1) ✅ umgesetzt |
-| Z-2 | *(fehlt in Befund.md)* schreibendes Geräteskript liegt in `tests/` | neu | mittel | [P-6](#p-6) |
+| Z-2 | *(fehlt in Befund.md)* schreibendes Geräteskript liegt in `tests/` | neu | mittel | [P-6](#p-6) ✅ umgesetzt |
 
 **Kurzurteil:** Sechs von acht Befunden treffen zu, drei davon sind ernst und
 klein zu beheben. Einer (BF-M1) ist gegen einen veralteten oder unvollständigen
@@ -382,10 +382,17 @@ Vorgehen:
 Prüfung: `_assemble_block()` direkt mit `b"#"`, `b"#4"`, `b"#4AB12"` und `b"#0"`
 aufrufen — jeder Fall `ProtocolError`, keiner ein nackter `ValueError`.
 
-### Paket B — Schreibzugriffe sichtbar machen (etwa ein Tag)
+### Paket B — Schreibzugriffe sichtbar machen (etwa ein Tag) — ✅ ABGESCHLOSSEN 2026-08-19
+
+> P-5 und P-6 sind umgesetzt. Änderungsdokumente:
+> [P-5](AENDERUNGEN_2026-08-19_P-5.md) · [P-6](AENDERUNGEN_2026-08-19_P-6.md)
 
 #### P-5
 **BF-H4 — Schreibprobe in Stufe 5b zum Laufzeitparameter machen** · `0,5 Tag` · Risiko gering
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-5.md](AENDERUNGEN_2026-08-19_P-5.md).
+> 214 Tests grün (8 neue), Gegenprobe durchgeführt. Umgesetzt wie geplant:
+> `main(enable_write_probe=False)`, `--write-probe` über argparse, Warnzeilen vor
+> dem ersten Zugriff. Stufenskripte sind damit erstmals überhaupt getestet.
 
 Ziel: Voreinstellung wieder rein lesend, Schreiben nur auf ausdrückliche Ansage —
 ohne dem Bearbeiter die Fähigkeit zu nehmen, die er für M0-1 bis M0-3 braucht.
@@ -412,6 +419,11 @@ erstmals maschinell abgesichert.
 
 #### P-6
 **Z-2 — Geräteskript aus der Testsuite herausnehmen** · `0,25 Tag` · Risiko sehr gering
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-6.md](AENDERUNGEN_2026-08-19_P-6.md).
+> 206 Tests grün (2 neue). Abweichung vom Plantext: die Sicherung ist keine
+> AST-Prüfung, sondern eine Sperre auf Modulebene in `conftest.py` — nur die
+> greift auch beim Einsammeln. Der AST-Scanner wurde gebaut und wieder verworfen,
+> begründet im Änderungsdokument, Abschnitt 4.
 
 Ziel: `tests/` enthält ausschließlich, was ohne Gerät läuft — so, wie `conftest.py`
 es zusagt.
@@ -432,10 +444,17 @@ Vorgehen:
 Prüfung: `pytest --collect-only` sammelt die Datei nicht mehr ein; die neue
 Sicherung schlägt an, wenn man sie versuchsweise zurückkopiert.
 
-### Paket C — Portabilität (ein bis anderthalb Tage)
+### Paket C — Portabilität (ein bis anderthalb Tage) — ✅ ABGESCHLOSSEN 2026-08-19
+
+> P-7 ist umgesetzt: [AENDERUNGEN_2026-08-19_P-7.md](AENDERUNGEN_2026-08-19_P-7.md)
 
 #### P-7
 **BF-M2 — Herkunft der Verbindungsparameter konfigurierbar machen** · `1–1,5 Tage` · Risiko mittel
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-7.md](AENDERUNGEN_2026-08-19_P-7.md).
+> 241 Tests grün (26 neue), Gegenprobe durchgeführt. Umgesetzt wie geplant, mit
+> einem Zusatz: die Konfigurationsdatei ist JSON (nicht TOML — `tomllib` gibt es
+> erst ab Python 3.11, verlangt werden 3.10), und `_`-Schlüssel gelten als
+> Kommentare, damit die mitgelieferte Vorlage unverändert kopierbar ist.
 
 Ziel: Der Treiber läuft auf einem zweiten Rechner, ohne dass Quelltext geändert
 wird. Deckt zugleich ROADMAP M5-2 zur Hälfte ab.
@@ -464,10 +483,19 @@ Prüfung: `from_environment()` gegen gesetzte und nicht gesetzte Variablen
 (`monkeypatch.setenv`); Rangfolge Parameter vor Umgebung; unveränderte
 Voreinstellungen, wenn nichts gesetzt ist.
 
-### Paket D — Restarbeiten (halber Tag)
+### Paket D — Restarbeiten (halber Tag) — ✅ ABGESCHLOSSEN 2026-08-19
+
+> P-8 ist umgesetzt: [AENDERUNGEN_2026-08-19_P-8.md](AENDERUNGEN_2026-08-19_P-8.md).
+> **Damit sind alle acht Planpunkte erledigt**; die Testsuite ist von 176 auf 241
+> Fälle gewachsen.
 
 #### P-8
 **BF-M1-Rest + BF-N1-Rest — Werkzeuge und Dokumentation nachziehen** · `0,5 Tag` · Risiko sehr gering
+> **UMGESETZT am 2026-08-19** — siehe [AENDERUNGEN_2026-08-19_P-8.md](AENDERUNGEN_2026-08-19_P-8.md).
+> `ruff check .` und `mypy` laufen ohne Argumente und sind grün. Zusatz gegenüber
+> dem Plantext: die Werkzeuge wurden vor dem Deklarieren laufen gelassen und
+> konfiguriert, sodass sie beim ersten Aufruf keine Altlasten vorsetzen — dabei
+> kam eine echte Typlücke in `RangePlan.describe()` heraus.
 
 - `[project.optional-dependencies]` um eine `dev`-Gruppe ergänzen: `pytest`,
   `pyflakes`, `ruff`, `mypy`. Damit ist reproduzierbar, womit geprüft wird —

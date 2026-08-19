@@ -32,7 +32,9 @@ OUTPUT_DIR: Path = Path.cwd() / "konfiguration"
 
 def main() -> int:
     """Stufe 5 ausfuehren. Rueckgabewert 0 = erfolgreich."""
-    config = WTConfig()
+    # UEBERARBEITET (P-7): Verbindungsparameter aus der Auflaesungskette -
+    # WT3000_*-Umgebungsvariablen oder 'wt3000.json'. Siehe README.
+    config = WTConfig.from_environment()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -97,4 +99,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main())

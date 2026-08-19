@@ -106,3 +106,34 @@ def test_stufenskripte_fuehren_beim_import_nichts_aus():
                  "stage5_input_config", "stage5b_range_probe"):
         modul = importlib.import_module(f"wt3000_scpi.{name}")
         assert callable(modul.main)
+
+
+# ---------------------------------------------------------------------------
+# Die Suite bleibt geraetefrei
+# ---------------------------------------------------------------------------
+
+
+def test_testsuite_kann_keine_geraeteverbindung_oeffnen():
+    """Belegt die Sperre aus tests/conftest.py.
+
+    Der Kopf von conftest.py sagt zu, dass die Suite ohne Geraet und ohne
+    tmctl.dll laeuft. Diese Zusage war lange nur Absicht: unter tests/ lag ein
+    Skript, das eine echte Verbindung aufbaute und einen Messbereich schrieb.
+    Seit es nach tools/hardware/ umgezogen ist, sichert conftest.py die Zusage
+    aktiv ab - dieser Test haelt fest, dass die Sperre auch wirklich greift.
+    """
+    from wt3000_scpi.wt3000_transport import TmctlTransport, WTConfig
+
+    with pytest.raises(RuntimeError, match="ohne Geraet"):
+        TmctlTransport(WTConfig())
+
+
+def test_die_sperre_laesst_den_protokollvertrag_unberuehrt():
+    """Der stillgelegte Konstruktor darf die Typpruefung nicht beschaedigen.
+
+    'issubclass(TmctlTransport, Transport)' in test_fake_transport.py haengt an
+    write/read/query/set_timeout/close - nicht am Konstruktor.
+    """
+    from wt3000_scpi.wt3000_transport import TmctlTransport, Transport
+
+    assert issubclass(TmctlTransport, Transport)

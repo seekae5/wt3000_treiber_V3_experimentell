@@ -123,7 +123,12 @@ class RangePlan:
 
     def describe(self) -> list[str]:
         """Alle Vorgaben als Textzeilen."""
-        return [s.describe() for s in (*self.ranges, *self.autos)]
+        # Die Annotation ist noetig, weil RangeSpec und AutoRangeSpec keine
+        # gemeinsame Basisklasse haben - ohne sie faellt der Typ auf 'object'
+        # zurueck und describe() waere fuer eine Typpruefung nicht auffindbar.
+        # Dieselbe Vereinigung steht bereits in der Signatur von of().
+        alle: tuple[RangeSpec | AutoRangeSpec, ...] = (*self.ranges, *self.autos)
+        return [s.describe() for s in alle]
 
     # -- Pruefung -----------------------------------------------------------
 
@@ -638,4 +643,4 @@ def applied_ranges(
         except WTError as error:
             location = backup_file if backup_file is not None else "nicht gesichert"
             _log.error("Wiederherstellung fehlgeschlagen: %s - Backup: %s", error, location)
-            raise
+            raise

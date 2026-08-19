@@ -1,13 +1,11 @@
 # =============================================================================
 # Datei: wt3000_input.py
-# Layer 2 (Erweiterung) - Eingangs- und Messkonfiguration
+# Layer 2 - Eingangs- und Messkonfiguration
 #
-# Deckt die bisher fehlenden Stellgroessen ab:
+# Abgedeckte Stellgroessen:
 #   Verdrahtung, Spannungsbereich, Strombereich (direkt + Sensoreingang),
 #   Auto-Range, Crest-Faktor, Line-/Frequenzfilter, Skalierung (State/VT/CT/
 #   SFACtor/SRATio), Sync-Quelle, Update-Rate.
-#
-# Aendert nichts an wt3000_core.py, wt3000_numeric.py oder wt3000_itemspec.py.
 #
 # GRUNDREGEL DIESES MODULS
 # Das Geraet ist metrologisch eingemessen. Jeder Schreibzugriff ist daher
@@ -27,15 +25,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
-# UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 from .wt3000_core import WTError, WTSession
 
-# NEU (M0-1, siehe ROADMAP.md): Die Parametersyntax der Bereichsknoten ist am
-# Geraet geklaert. Die reine NRf-Form ('1000') wird angenommen, die Formatierung
-# liegt ab jetzt nur noch an EINER Stelle - in wt3000_common.format_nrf().
-# wt3000_rangeio.py benutzt dieselbe Funktion bereits; damit ist Befund B-01
-# erledigt. Layer bleibt gewahrt: wt3000_common ist Layer 1, dieses Modul
-# Layer 2 (siehe LAYERS in tests/test_package_layout.py).
+# Bereichswerte werden ausschliesslich hierueber geformt - dieselbe Funktion,
+# die auch wt3000_rangeio.py benutzt. Am Geraet belegt ist die reine NRf-Form
+# ('1000'); zwei Schreibweisen fuer denselben Knoten waeren Befund B-01.
 from .wt3000_common import format_nrf
 
 _log = logging.getLogger("wt3000.input")
@@ -312,20 +306,15 @@ def _float_close(expected: float, actual: float, rel: float = 1e-3) -> bool:
     return abs(expected - actual) <= rel * abs(expected)
 
 
-# UEBERARBEITET (INPUT-13): _token_match() ist ersatzlos entfallen.
+# EINE Regel fuer Aufzaehlungswerte - Vergleich (diff), Wiederherstellung und
+# die Rueckleseproben der Setter benutzen alle enum_match(). Laufen sie
+# auseinander, entsteht eine Wiederherstellung, die nicht konvergiert: diff()
+# meldet eine Abweichung, die kein Schreibpfad aufloest.
 #
-# Bisher gab es ZWEI Regeln fuer dieselben Aufzaehlungswerte: InputSnapshot.diff()
-# verglich sync_source/voltage_mode/current_mode exakt, restore_input_snapshot()
-# und die Rueckleseproben der Setter praefixtolerant. Bei Soll 'EXTERNAL' und Ist
-# 'EXT' meldete diff() eine Abweichung, restore sah keinen Handlungsbedarf, und
-# die Schlusskontrolle warf VerificationError ueber einen Zustand, den sie selbst
-# fuer korrekt hielt - eine Wiederherstellung, die nie konvergiert.
-#
-# Ab jetzt gilt fuer Vergleich UND Wiederherstellung dieselbe Regel: beide Seiten
-# werden gegen die bekannte Aufzaehlung auf ihre LANGFORM normalisiert und dann
-# exakt verglichen. Freies Praefixmatching wird bewusst nicht verwendet - es
-# wuerde bei mehrdeutigen Kurzformen ('U' passt auf U1..U4) still das falsche
-# Element treffen; genau die Falle, die in Stufe 3 bei SIGMA/SIGMB gefunden wurde.
+# Beide Seiten werden auf ihre LANGFORM normalisiert und dann exakt verglichen.
+# Freies Praefixmatching waere hier falsch - bei mehrdeutigen Kurzformen ('U'
+# passt auf U1..U4) traefe es still das falsche Element. Genau die Falle, die in
+# Stufe 3 bei SIGMA/SIGMB gefunden wurde.
 
 # Langformen der Aufzaehlungen, gegen die normalisiert wird.
 SYNC_TOKENS: frozenset[str] = frozenset(s.value.upper() for s in SyncSource)
@@ -376,17 +365,17 @@ def _check_allowed(value: float, allowed: tuple[float, ...], what: str) -> float
 # ---------------------------------------------------------------------------
 
 
-# UEBERARBEITET (M0-1, siehe ROADMAP.md): format_voltage() und format_current()
-# sind entfallen. Am Geraet wurde geprueft, dass der Bereichsknoten die reine
-# NRf-Form annimmt (Element 4, Direkteingang, ':INPut:VOLTage:RANGe:ELEMent4 1000'
-# gesetzt und identisch zurueckgelesen). Damit gab es zwei Schreibweisen fuer
-# denselben Knoten - dieses Modul haengte eine Einheit an, wt3000_rangeio.py
-# sendete NRf. Die Einheitenform wird ersatzlos aufgegeben, geformt wird nur
-# noch mit wt3000_common.format_nrf().
+# STILLGELEGT, nicht geloescht - offener Punkt ROADMAP M0-1.
 #
-# Auskommentiert statt geloescht, bis der Geraetetermin auch den Sensor- und
-# den Direktstromknoten bestaetigt hat (ROADMAP M0-1, Spiegelstrich 2 und 3).
-# Danach ersatzlos entfernen.
+# Die Einheitenschreibweise ist aufgegeben: am Geraet belegt ist die reine
+# NRf-Form (Element 4, Direkteingang, ':INPut:VOLTage:RANGe:ELEMent4 1000'
+# gesetzt und identisch zurueckgelesen). Geformt wird nur noch mit
+# wt3000_common.format_nrf() - siehe den Import am Dateikopf.
+#
+# Die beiden Funktionen bleiben stehen, bis der Geraetetermin auch den Sensor-
+# und den Direktstromknoten bestaetigt hat (M0-1, Spiegelstrich 2 und 3). Faellt
+# dort die Einheitenform doch an, ist sie hier wieder greifbar; sonst ersatzlos
+# entfernen.
 #
 # def format_voltage(volts: float) -> str:
 #     """Spannungsangabe fuer das Geraet ('1000V', '7.5V')."""
@@ -636,10 +625,10 @@ class InputConfig:
             raise WTError(f"Kein Elementtyp fuer Element {element} bekannt")
         return self._module_cache[element]
 
-    # NEU (ROADMAP M1-1): die Fassade braucht die Elementtypen als Ganzes, um
-    # bestueckte von unbestueckten Elementen zu unterscheiden. Ohne diese
-    # Methode muesste sie ':INPut:MODUle?' selbst parsen - das waere die vierte
-    # Fassung derselben Regel (vgl. Befund B-03).
+    # Die Fassade braucht die Elementtypen als Ganzes, um bestueckte von
+    # unbestueckten Elementen zu unterscheiden. Ohne diese Methode muesste sie
+    # ':INPut:MODUle?' selbst parsen - die vierte Fassung derselben Regel
+    # (Befund B-03).
     def get_modules(self) -> dict[int, int]:
         """Elementtypen aller gemeldeten Elemente: {Elementnummer: 30|2|0}.
 
@@ -787,9 +776,7 @@ class InputConfig:
             GROUP_RANGE,
             _BASE_VOLT_RANGE,
             target,
-            # UEBERARBEITET (M0-1): am Geraet belegte Form. Vorher:
-            # format_voltage(value),
-            format_nrf(value),  # NEU (M0-1): '1000' statt '1000V'
+            format_nrf(value),  # am Geraet belegt: '1000', nicht '1000V'
             lambda actual: _float_close(value, parse_float(actual)),
             "Spannungsbereich setzen",
         )
@@ -826,13 +813,11 @@ class InputConfig:
             GROUP_RANGE,
             _BASE_CURR_RANGE,
             target,
-            # UEBERARBEITET (M0-1): derselbe Knoten, dieselbe Regel. Vorher:
-            # format_current(value),   # ergab '5A' bzw. '500MA'
-            # ZU VERIFIZIEREN: Am Geraet belegt ist bisher nur der
-            # Spannungsknoten. Fuer den Direktstrom steht die Gegenprobe
-            # ('5A' gegen '500MA' gegen '0.5') noch aus - ROADMAP M0-1.
-            # Die Rueckleseprobe in _write_element() faengt eine Ablehnung ab.
-            format_nrf(value),  # NEU (M0-1): Amperewert in reiner NRf-Form
+            # ZU VERIFIZIEREN (ROADMAP M0-1): am Geraet belegt ist bisher nur
+            # der Spannungsknoten. Fuer den Direktstrom steht die Gegenprobe
+            # '5A' gegen '500MA' gegen '0.5' noch aus. Die Rueckleseprobe in
+            # _write_element() faengt eine Ablehnung ab.
+            format_nrf(value),
             matches,
             "Strombereich setzen",
         )
@@ -851,12 +836,10 @@ class InputConfig:
             GROUP_RANGE,
             _BASE_CURR_RANGE,
             target,
-            # UEBERARBEITET (M0-1): identisch zu wt3000_rangeio.set_range(
-            # ..., sensor=True). Vorher:
-            # f"EXTernal,{format_voltage(value)}",
-            # ZU VERIFIZIEREN: 'EXTernal,10' gegen 'EXTernal,10V' ist am Geraet
-            # noch nicht gegengeprueft - ROADMAP M0-1, Spiegelstrich 2.
-            f"EXTernal,{format_nrf(value)}",  # NEU (M0-1)
+            # Identisch zu wt3000_rangeio.set_range(..., sensor=True).
+            # ZU VERIFIZIEREN (ROADMAP M0-1, Spiegelstrich 2): 'EXTernal,10'
+            # gegen 'EXTernal,10V' ist am Geraet noch nicht gegengeprueft.
+            f"EXTernal,{format_nrf(value)}",
             matches,
             "Sensorbereich setzen",
         )
@@ -941,18 +924,10 @@ class InputConfig:
         unplausible Leistungswerte, wenn sie auf einen Kanal ohne Signal
         zeigt (Condition-Bit 7, PLLE).
         """
-        # UEBERARBEITET (F-05, siehe AENDERUNGEN_2026-08-18.md): Die Eingabe wird
-        # jetzt ZUERST ueber canonical_enum_token() auf die Langform gebracht und
-        # erst danach geprueft. Vorher wurde exakt gegen die Langformen der
-        # Aufzaehlung geprueft - eine Kurzform wie 'EXT' flog raus. Genau diese
-        # Kurzform liefert aber das Geraet selbst (VERBose ist aus), und
-        # InputSnapshot.capture() legt sie unveraendert in den Snapshot. Damit
-        # scheiterte restore_input_snapshot() mit 'Ungueltige Sync-Quelle' an
-        # einem Wert, den das Geraet zuvor selbst gemeldet hatte - die Korrektur
-        # zu INPUT-13 hatte Vergleich und Wiederherstellung angeglichen, den
-        # Eingang des Setters aber ausgelassen.
-        # Zweiter Punkt: 'valid' war eine Zweitfassung des Modulkonstanten
-        # SYNC_TOKENS - dieselbe Menge, zweimal gebildet. Jetzt nur noch eine.
+        # Erst normalisieren, dann pruefen. Das Geraet meldet Kurzformen
+        # ('EXT'), InputSnapshot.capture() legt sie unveraendert ab, und
+        # restore_input_snapshot() reicht sie hier wieder herein - eine Pruefung
+        # gegen die blossen Langformen scheiterte am eigenen Geraetewert.
         token = str(source.value if isinstance(source, SyncSource) else source).strip()
         canonical = canonical_enum_token(token, SYNC_TOKENS)
         if canonical not in SYNC_TOKENS:
@@ -968,7 +943,7 @@ class InputConfig:
             # Gesendet wird die Langform - das Geraet akzeptiert sie ebenso wie
             # die Kurzform, und im Protokoll steht dann, was gemeint war.
             canonical,
-            # UEBERARBEITET (INPUT-13): dieselbe Regel wie diff()/restore.
+            # Dieselbe Regel wie diff() und restore - siehe enum_match().
             lambda actual: enum_match(canonical, actual, SYNC_TOKENS),
             "Sync-Quelle setzen",
         )
@@ -1037,14 +1012,10 @@ class InputConfig:
         self, base: str, mode: MeasMode | str, target: int | str, label: str
     ) -> None:
         """Gemeinsamer Pfad fuer VOLTage:MODE und CURRent:MODE."""
-        # UEBERARBEITET (F-05, siehe AENDERUNGEN_2026-08-18.md): gleiche Ursache
-        # wie bei set_sync_source(). Das Geraet meldet den Messmodus in Kurzform
-        # ('RMEA' statt 'RMEAN'); restore_input_snapshot() reicht genau diesen
-        # Wert wieder herein und lief hier in ein WTError. Der Fehler wurde auch
-        # nicht von _restore_mode() aufgefangen - das faengt nur ConfigLocked -
-        # und hat damit die gesamte Wiederherstellung abgebrochen.
-        # 'MODE_TOKENS' ersetzt zugleich die zweite, inline gebildete Kopie
-        # derselben Wertemenge.
+        # Erst normalisieren, dann pruefen - wie bei set_sync_source(). Das
+        # Geraet meldet 'RMEA' statt 'RMEAN'. Ein WTError von hier faengt
+        # _restore_mode() NICHT ab (nur ConfigLocked) und wuerde die gesamte
+        # Wiederherstellung abbrechen.
         token = str(mode.value if isinstance(mode, MeasMode) else mode).strip().upper()
         canonical = canonical_enum_token(token, MODE_TOKENS)
         if canonical not in MODE_TOKENS:
@@ -1054,7 +1025,7 @@ class InputConfig:
             base,
             target,
             canonical,
-            # UEBERARBEITET (INPUT-13): dieselbe Regel wie diff()/restore.
+            # Dieselbe Regel wie diff() und restore - siehe enum_match().
             lambda actual: enum_match(canonical, actual, MODE_TOKENS),
             f"{label} setzen",
         )
@@ -1368,8 +1339,7 @@ def _diff_element(wanted: ElementSettings, got: ElementSettings) -> list[str]:
         if a != b:
             problems.append(f"{prefix} {name}: soll {a}, ist {b}")
 
-    # UEBERARBEITET (INPUT-13): Aufzaehlungswerte werden nicht mehr exakt
-    # verglichen, sondern ueber dieselbe Regel wie in restore_input_snapshot().
+    # Aufzaehlungswerte ueber dieselbe Regel wie in restore_input_snapshot().
     def compare_enum(name: str, a: str, b: str, allowed: frozenset[str]) -> None:
         if not enum_match(a, b, allowed):
             problems.append(f"{prefix} {name}: soll {a}, ist {b}")
@@ -1397,10 +1367,10 @@ def _diff_element(wanted: ElementSettings, got: ElementSettings) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-# UEBERARBEITET (INPUT-13): Der Modus liegt in GROUP_MODE, die der Aufrufer
-# nicht zwingend freigegeben hat. Statt die Wiederherstellung mitten im Lauf
-# abzubrechen, wird die Sperre als klare Meldung protokolliert; die
-# Schlusskontrolle meldet die verbleibende Abweichung ohnehin.
+# Der Modus liegt in GROUP_MODE, die der Aufrufer nicht zwingend freigegeben
+# hat. Statt die Wiederherstellung mitten im Lauf abzubrechen, wird die Sperre
+# als klare Meldung protokolliert; die Schlusskontrolle meldet die verbleibende
+# Abweichung ohnehin.
 def _restore_mode(
     setter: Callable[[str, int], None], value: str, element: int, label: str
 ) -> int:
@@ -1430,10 +1400,9 @@ def restore_input_snapshot(config: InputConfig, snapshot: InputSnapshot) -> int:
     Crest-Faktor und Wiring zuerst, weil sie die zulaessigen Bereiche und die
     Unit-Zuordnung bestimmen.
 
-    UEBERARBEITET (INPUT-13): Vergleich und Wiederherstellung benutzen fuer
-    Aufzaehlungswerte jetzt dieselbe Regel (enum_match), und der Messmodus wird
-    tatsaechlich zurueckgestellt. Vorher konnte diff() eine Abweichung melden,
-    die kein Schreibpfad je aufgeloest haette.
+    Vergleich und Wiederherstellung benutzen fuer Aufzaehlungswerte dieselbe
+    Regel (enum_match) - laufen sie auseinander, meldet diff() Abweichungen, die
+    kein Schreibpfad aufloest.
 
     Der Aufrufer muss die betroffenen Gruppen vorher freigeben, z.B.:
         with config.unlocked(GROUP_RANGE, GROUP_FILTER, GROUP_MODE, GROUP_RATE):
@@ -1516,18 +1485,15 @@ def restore_input_snapshot(config: InputConfig, snapshot: InputSnapshot) -> int:
             config.set_scaling_state(wanted.scaling, element)
             written += 1
 
-        # UEBERARBEITET (INPUT-13): identische Regel wie in _diff_element().
+        # Identische Regel wie in _diff_element().
         if got is None or not enum_match(
             wanted.sync_source, got.sync_source, SYNC_TOKENS
         ):
             config.set_sync_source(wanted.sync_source, element)
             written += 1
 
-        # UEBERARBEITET (INPUT-13): Der Messmodus wurde bisher verglichen, aber
-        # nie zurueckgestellt. Eine Abweichung haette die Schlusskontrolle
-        # unweigerlich zum Anschlag gebracht, ohne dass irgendein Schreibpfad sie
-        # haette aufloesen koennen. Die Gruppe GROUP_MODE muss der Aufrufer
-        # freigeben; ist sie gesperrt, wird das hier benannt statt verschleiert.
+        # GROUP_MODE muss der Aufrufer freigeben; ist sie gesperrt, benennt
+        # _restore_mode() das, statt es zu verschleiern.
         if got is None or not enum_match(
             wanted.voltage_mode, got.voltage_mode, MODE_TOKENS
         ):

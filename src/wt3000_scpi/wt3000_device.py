@@ -45,7 +45,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 
@@ -577,17 +577,17 @@ class WT3000:
             with WT3000.connect() as wt:
                 ...
         """
-        overrides: dict[str, object] = {}
-        if ip is not None:
-            overrides["ip"] = ip
-        if dll_path is not None:
-            overrides["dll_path"] = dll_path
-        if timeout_ms is not None:
-            overrides["timeout_ms"] = timeout_ms
-        if use_remote is not None:
-            overrides["use_remote"] = use_remote
-
-        config = replace(WTConfig(), **overrides) if overrides else WTConfig()
+        # UEBERARBEITET (P-7, siehe PLAN_BEFUNDE_2026-08-19.md): Grundlage ist
+        # jetzt die Auflaesungskette aus WTConfig.from_environment() -
+        # ausdruecklicher Parameter vor Umgebungsvariable vor
+        # Konfigurationsdatei vor Voreinstellung. Ein blosses WTConfig() traegt
+        # seit P-7 keine IP mehr; connect() ohne Argumente holt sie von dort.
+        config = WTConfig.from_environment(
+            ip=ip,
+            dll_path=dll_path,
+            timeout_ms=timeout_ms,
+            use_remote=use_remote,
+        )
         return cls.from_config(config, read_only=read_only, allow_changes=allow_changes)
 
     @classmethod

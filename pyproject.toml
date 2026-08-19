@@ -13,6 +13,15 @@ dependencies = []
 [project.optional-dependencies]
 # Die Testsuite braucht kein Geraet und keine tmctl.dll.
 test = ["pytest>=8.0"]
+# NEU (P-8): womit geprueft wird, ist ab jetzt reproduzierbar. Der Code haelt
+# die unten konfigurierten Regelsaetze heute ein - wer 'dev' installiert,
+# bekommt keine Altlasten vorgesetzt, sondern eine gruene Ausgangslage.
+dev = [
+    "pytest>=8.0",
+    "pyflakes>=3.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wt3000_scpi"]
@@ -20,3 +29,43 @@ packages = ["src/wt3000_scpi"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+# NEU (P-8) ------------------------------------------------------------------
+# Zeilenlaenge 100 statt der ruff-Voreinstellung 88: das ist die Breite, in der
+# dieses Projekt geschrieben ist. Sie nachtraeglich auf 88 zu druecken haette
+# 91 Umbrueche quer durch alle Dateien erzwungen, ohne dass eine davon ein
+# Fehler waere.
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+# Bewusst der enge Satz: E/W (pycodestyle) und F (pyflakes) - also genau das,
+# was auch ohne ruff schon geprueft wurde, plus Zeilenlaenge. Der Code ist
+# damit heute vollstaendig sauber.
+#
+# Weitere Regelfamilien sind Kandidaten, aber jede zieht einen mechanischen
+# Umbau nach sich und gehoert deshalb in einen eigenen, getrennt pruefbaren
+# Schritt (Stand 2026-08-19):
+#   I   Importsortierung          12 Stellen
+#   UP  neuere Sprachmittel       37 Stellen (grosser Teil: veraltete
+#                                 Zeichenketten-Annotationen wie "WTSession")
+#   SIM Vereinfachungen           14 Stellen (meist verschachtelte with-Bloecke)
+#   DTZ datetime ohne Zeitzone     7 Stellen - inhaltlich zu pruefen, nicht
+#                                 mechanisch: Messzeitstempel sind bereits
+#                                 zeitzonenbehaftet, Dateinamen bewusst lokal.
+select = ["E", "F", "W"]
+
+[tool.mypy]
+files = ["src/wt3000_scpi"]
+python_version = "3.10"
+# Der Transport ist Windows-gebunden ('ctypes.WinDLL'). Ohne diese Angabe
+# meldet eine Pruefung auf macOS oder Linux einen Fehler, der auf dem
+# Zielsystem keiner ist.
+platform = "win32"
+# Das Projekt benutzt an mehreren Stellen denselben Namen fuer zwei
+# aufeinanderfolgende Schleifen ueber verschiedene Typen (plan.ranges, dann
+# plan.autos). Das ist lesbar und korrekt; ohne diesen Schalter meldet mypy
+# elf Fehler, von denen keiner einer ist.
+allow_redefinition = true
+ignore_missing_imports = true

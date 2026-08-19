@@ -21,6 +21,46 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
+# ---------------------------------------------------------------------------
+# Sicherung: kein Geraetezugriff aus der Testsuite
+# ---------------------------------------------------------------------------
+#
+# Die Zusage im Kopf dieser Datei war bisher nur eine Absichtserklaerung. Eine
+# Zeit lang lag unter tests/ ein Skript, das eine echte TMCTL-Verbindung
+# aufbaute und einen Messbereich schrieb (heute tools/hardware/). Es enthielt
+# keine Testfunktion und blieb deshalb folgenlos - eine spaeter ergaenzte
+# Testfunktion oder ein Aufruf auf Modulebene haette pytest aber unbemerkt an
+# das eingemessene Geraet schreiben lassen.
+#
+# 'TmctlTransport' ist das einzige Tor, durch das eine echte Verbindung
+# entsteht: WT3000.connect() und WT3000.from_config() gehen ebenfalls
+# hindurch. Der Konstruktor wird deshalb hier stillgelegt.
+#
+# Bewusst auf MODULEBENE und nicht als Fixture: conftest.py wird vor dem
+# Einsammeln der Testmodule importiert. Nur so greift die Sperre auch bei einem
+# Geraeteaufruf auf Modulebene, der schon beim Import liefe - also genau in dem
+# Fall, den eine Fixture zu spaet erwischen wuerde.
+#
+# Nicht betroffen: 'issubclass(TmctlTransport, Transport)' in
+# test_fake_transport.py - der Protokollvertrag haengt an write/read/query/
+# set_timeout/close, nicht am Konstruktor. Ebenso das monkeypatch auf
+# wt3000_device.TmctlTransport in test_device_facade.py: dort wird der Name
+# ersetzt, der echte Konstruktor also gar nicht erreicht.
+from wt3000_scpi.wt3000_transport import TmctlTransport  # noqa: E402
+
+
+def _kein_geraetezugriff(self, *args, **kwargs):
+    raise RuntimeError(
+        "TmctlTransport() aus der Testsuite heraus: diese Suite laeuft ohne "
+        "Geraet und ohne tmctl.dll. Fuer Tests 'FakeTransport' benutzen "
+        "(wt3000_scpi.wt3000_transport). Skripte, die wirklich mit dem Geraet "
+        "sprechen, gehoeren nach tools/hardware/ und nicht unter tests/."
+    )
+
+
+TmctlTransport.__init__ = _kein_geraetezugriff
+
+
 class FakeSession:
     """Minimalersatz fuer WTSession - beantwortet Queries aus einer Tabelle.
 

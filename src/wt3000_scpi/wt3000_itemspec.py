@@ -178,7 +178,12 @@ def save_backup_bundle(path: Path, table: ItemTable, tail: list[NumericItem]) ->
         ],
     }
     path.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
-    _log.info("Backup-Bundle gesichert nach %s (%d Items + %d Tail)", path, len(table.items), len(tail))
+    _log.info(
+        "Backup-Bundle gesichert nach %s (%d Items + %d Tail)",
+        path,
+        len(table.items),
+        len(tail),
+    )
 
 
 def load_backup_bundle(path: Path) -> tuple[ItemTable, list[NumericItem]]:
@@ -315,4 +320,4 @@ def restore_item_table(
         written += 1
         session.assert_no_error("Wiederherstellung des Tails")
 
-    return written
+    return written

@@ -84,7 +84,7 @@ denselben Knoten. Höchstens eine Form kann richtig sein.
 ### M0-3 — Braucht `:INPut` ein `:COMMunicate:REMote ON`? `S · am Gerät`
 **Blockiert:** jede schreibende Nutzung von `InputConfig`/`RangeAccess`
 
-- `stage5b_range_probe.py` mit `ENABLE_NOOP_WRITE_PROBE = True` einmal laufen lassen — das Skript ist genau dafür gebaut und schreibt einen Nulleffekt
+- `python -m wt3000_scpi.stage5b_range_probe --write-probe` einmal laufen lassen — das Skript ist genau dafür gebaut und schreibt einen Nulleffekt. Ohne den Schalter bleibt es rein lesend (P-5)
 - Zusätzlich einmal mit `use_remote=True` gegenprüfen
 - Ergebnis: `use_remote` wird entweder Voreinstellung `True` oder der Kommentar in `WTConfig` wird zur Feststellung statt zur Vermutung
 - **Fertig, wenn:** `WTConfig.use_remote` einen begründeten Standardwert hat

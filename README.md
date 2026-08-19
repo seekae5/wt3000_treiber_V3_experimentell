@@ -31,7 +31,14 @@ Was noch fehlt und in welcher Reihenfolge es entsteht, steht in [ROADMAP.md](ROA
 
 ## Installation
 
+**Python 3.10 oder neuer wird zwingend gebraucht.** Das Paket benutzt
+Laufzeit-Typaliase der Form `bytes | str`; unter Python 3.9 scheitert bereits der Import
+mit `TypeError: unsupported operand type(s) for |`. Auf macOS genügt das mitgelieferte
+System-Python (3.9) also **nicht** — der empfohlene Weg ist eine eigene Umgebung:
+
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[test]"
 ```
 
@@ -40,6 +47,8 @@ Für den Betrieb am Gerät zusätzlich nötig:
 * **Windows** — der Transport benutzt `ctypes.WinDLL`
 * **`tmctl64.dll`** aus dem Yokogawa-TMCTL-Paket, samt der DLLs im selben Verzeichnis
 * Netzwerkverbindung zum Gerät; Benutzername und Passwort wie am Gerät eingestellt
+* eine `wt3000.json` mit den Verbindungsparametern — siehe
+  [Verbindungsparameter](#verbindungsparameter)
 
 **Für Entwicklung und Tests wird nichts davon gebraucht.** Die gesamte Testsuite läuft
 ohne Gerät und ohne DLL — der Import des Pakets setzt nichts voraus, weil die DLL erst
@@ -49,6 +58,21 @@ beim Instanziieren des Transports geladen wird.
 python tools_import_check.py    # Smoke-Check: lässt sich das Paket importieren?
 pytest                          # die eigentliche Prüfung
 ```
+
+### Prüfwerkzeuge
+
+`pip install -e ".[dev]"` bringt zusätzlich `ruff`, `mypy` und `pyflakes`. Beide
+konfigurierten Werkzeuge laufen ohne Argumente und sind **heute vollständig grün**:
+
+```bash
+ruff check .    # Stil und ungenutzte Namen (E/F/W, Zeilenlänge 100)
+mypy            # Typprüfung über src/, Zielplattform Windows
+pytest          # 241 Fälle, unter einer Sekunde
+```
+
+Die Einstellungen stehen in [pyproject.toml](pyproject.toml), jeweils mit Begründung —
+insbesondere, welche weiteren `ruff`-Regelfamilien Kandidaten sind und warum sie einen
+eigenen Schritt verdienen.
 
 ---
 
@@ -74,14 +98,49 @@ wieder frei und schließt die Verbindung — auch bei einem Fehler oder Strg+C.
 
 ### Verbindungsparameter
 
-`WT3000.connect()` übernimmt die Voreinstellungen aus `WTConfig` und lässt sich einzeln
-überschreiben:
+Im Quelltext steht **keine** IP, kein Benutzername, kein Passwort und kein
+rechnerspezifischer DLL-Pfad. Woher diese Werte kommen, entscheidet eine Kette mit vier
+Stufen — die erste, die etwas liefert, gewinnt, und zwar **je Feld einzeln**:
 
-```python
-wt = WT3000.connect(ip="192.168.10.20", dll_path=r"C:\tmctl\dll\tmctl64.dll", timeout_ms=5000)
+| Rang | Quelle | Beispiel |
+|------|--------|----------|
+| 1 | ausdrücklicher Parameter | `WT3000.connect(ip="10.0.0.5")` |
+| 2 | Umgebungsvariable | `WT3000_IP=10.0.0.5` |
+| 3 | Konfigurationsdatei | `wt3000.json` → `{"ip": "10.0.0.5"}` |
+| 4 | Voreinstellung der Klasse | neutral, nicht verbindungsfähig |
+
+**Der übliche Weg** ist die Konfigurationsdatei: [wt3000.example.json](wt3000.example.json)
+nach `wt3000.json` kopieren und anpassen. Die Datei ist per `.gitignore` ausgeschlossen —
+Zugangsdaten gehören nicht in die Versionsverwaltung. Gesucht wird sie in dieser
+Reihenfolge: `WT3000_CONFIG`, dann `./wt3000.json`, dann `~/wt3000.json`.
+
+```json
+{
+  "ip": "192.168.10.20",
+  "user": "TEST",
+  "password": "1",
+  "dll_path": "tmctl64.dll"
+}
 ```
 
-Wer alles selbst setzen will, baut eine `WTConfig` und benutzt `from_config()`. Für Tests
+Die Umgebungsvariablen heißen wie das Feld in Großschrift mit Präfix: `WT3000_IP`,
+`WT3000_DLL_PATH`, `WT3000_USER`, `WT3000_PASSWORD`, `WT3000_TIMEOUT_MS`,
+`WT3000_USE_REMOTE`. Ein leerer Wert zählt nicht als Angabe.
+
+**`dll_path`** darf ein voller Pfad sein oder ein bloßer Dateiname. Bei einem bloßen
+Namen (`tmctl64.dll`, die Voreinstellung) sucht Windows selbst in `PATH` und im
+Anwendungsverzeichnis — der übliche Fall bei installierter TMCTL. Ein angegebener *Pfad*
+muss dagegen existieren, sonst bricht der Verbindungsaufbau mit einer Meldung ab, die
+alle drei Wege zur Abhilfe nennt.
+
+Einzeln überschreiben geht weiterhin:
+
+```python
+wt = WT3000.connect(ip="192.168.10.20", timeout_ms=5000)
+```
+
+Wer alles selbst setzen will, baut eine `WTConfig` und benutzt `from_config()` —
+`WTConfig.from_environment()` liefert dabei die aufgelöste Grundlage. Für Tests
 und für spätere Transporte ohne TMCTL gibt es `from_transport()`:
 
 ```python
@@ -210,7 +269,7 @@ Für PyCharm liegen fertige Startkonfigurationen unter [.run/](.run).
 ## Tests
 
 ```bash
-pytest                                  # 176 Tests, unter einer Sekunde
+pytest                                  # 241 Tests, unter einer Sekunde
 pytest tests/test_device_facade.py -v   # nur die Fassade
 ```
 

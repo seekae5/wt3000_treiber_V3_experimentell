@@ -3,15 +3,27 @@
 # Layer 4 - Stufe 5b: die offenen Fragen zur Bereichseinstellung klaeren,
 #                     BEVOR jemals ein veraendernder Schreibversuch stattfindet.
 #
-# Voreinstellung: dieses Skript SCHREIBT NICHTS. Es oeffnet die Sitzung mit
-# read_only=True und RangeAccess mit allow_changes=False - zwei unabhaengige
-# Sperren, genau wie Stufe 5.
+# VOREINSTELLUNG: SCHREIBT NICHTS.
 #
-# Mit ENABLE_NOOP_WRITE_PROBE = True wird zusaetzlich EIN Kommando gesendet,
-# das den aktuellen Spannungsbereich des ersten Elements mit seinem EIGENEN
-# Wert ueberschreibt. Das ist ein Nulleffekt und beantwortet trotzdem die
-# Frage, ob die INPut-Gruppe Set-Kommandos ohne ':COMMunicate:REMote ON'
-# annimmt. Der Ausgangszustand wird davor gesichert und danach geprueft.
+#     python -m wt3000_scpi.stage5b_range_probe
+#
+# Die Sitzung wird mit read_only=True geoeffnet und RangeAccess mit
+# allow_changes=False - zwei unabhaengige Sperren, genau wie Stufe 5.
+#
+# MIT SCHREIBPROBE: nur auf ausdrueckliche Ansage.
+#
+#     python -m wt3000_scpi.stage5b_range_probe --write-probe
+#
+# Dann geht zusaetzlich EIN Set-Kommando hinaus, das den aktuellen
+# Spannungsbereich des ersten Elements mit seinem EIGENEN Wert ueberschreibt.
+# Das ist ein Nulleffekt und beantwortet trotzdem die Frage, ob die
+# INPut-Gruppe Set-Kommandos ohne ':COMMunicate:REMote ON' annimmt. Der
+# Ausgangszustand wird davor gesichert und danach geprueft.
+#
+# Der Schalter ist bewusst ein Aufrufparameter und keine Konstante im
+# Quelltext: eine Konstante, die man zum Arbeiten auf True stellt, bleibt auf
+# True stehen - und dann schreibt ein Skript, dessen Kopf 'schreibt nichts'
+# sagt.
 #
 # Beantwortete Fragen:
 #   (1) Rundet das Geraet Bereichswerte?  -> nur teilweise; siehe Hinweis unten
@@ -22,7 +34,9 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -39,19 +53,13 @@ from .wt3000_rangeio import Quantity, RangeAccess
 # Laufparameter
 # ---------------------------------------------------------------------------
 
-# True sendet GENAU EIN Set-Kommando mit dem bereits eingestellten Wert.
-# Kein Messwert und keine Eichung aendert sich dadurch. Trotzdem bewusst
-# abschaltbar, damit der erste Lauf am echten Geraet rein lesend bleibt.
-ENABLE_NOOP_WRITE_PROBE: bool = True #muss derzeit noch auf True stehen um Änderungen zuzulassen
-# -> Modifizierbar machen
-
 # Zielverzeichnis fuer Bericht, Backup und Protokoll.
 OUTPUT_DIR: Path = Path.cwd() / "konfiguration"
 
-
-# UEBERARBEITET (F-08, siehe AENDERUNGEN_2026-08-18.md): setup_logging() lag in
-# allen fuenf Stufenskripten als byteweise identische Kopie. Es gibt sie jetzt
-# nur noch einmal, in wt3000_common.py; hier wird sie importiert.
+# Der Spannungsbereich dieses Elements wird bei --write-probe mit seinem
+# eigenen Wert ueberschrieben. Element 1 ist der erste Eintrag von
+# RangeAccess.elements; probe_range_write_capability() waehlt ihn selbst.
+PROBE_ELEMENT: int = 1
 
 
 def report_environment(access: RangeAccess, log: logging.Logger) -> None:
@@ -104,9 +112,38 @@ def run_noop_write_probe(
     log.info("Zustand nach der Schreibprobe unveraendert")
 
 
-def main() -> int:
-    """Stufe 5b ausfuehren. Rueckgabewert 0 = erfolgreich."""
-    config = WTConfig()
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Kommandozeile auswerten. Ohne Schalter bleibt der Lauf rein lesend."""
+    parser = argparse.ArgumentParser(
+        prog="python -m wt3000_scpi.stage5b_range_probe",
+        description=(
+            "Messbereiche des WT3000 erfassen. Schreibt in der Voreinstellung "
+            "nichts."
+        ),
+    )
+    parser.add_argument(
+        "--write-probe",
+        action="store_true",
+        help=(
+            "Zusaetzlich EIN Set-Kommando senden, das den Spannungsbereich von "
+            f"Element {PROBE_ELEMENT} mit seinem EIGENEN Wert ueberschreibt "
+            "(Nulleffekt). Klaert, ob die INPut-Gruppe Set-Kommandos ohne "
+            "':COMMunicate:REMote ON' annimmt - ROADMAP M0-3."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(enable_write_probe: bool = False) -> int:
+    """Stufe 5b ausfuehren. Rueckgabewert 0 = erfolgreich.
+
+    enable_write_probe=False (Voreinstellung) laesst kein einziges
+    Set-Kommando hinaus: die Sitzung wird mit read_only=True geoeffnet, und
+    WTSession lehnt dann jedes Nicht-Query-Kommando ab.
+    """
+    # UEBERARBEITET (P-7): Verbindungsparameter aus der Auflaesungskette -
+    # WT3000_*-Umgebungsvariablen oder 'wt3000.json'. Siehe README.
+    config = WTConfig.from_environment()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -116,21 +153,34 @@ def main() -> int:
     setup_logging(log_file)
     log = logging.getLogger("wt3000.stage5b")
     log.info("Protokolldatei: %s", log_file)
-    log.info("Stufe 5b - Messbereiche erfassen (%s)",
-             "mit Nulleffekt-Schreibprobe" if ENABLE_NOOP_WRITE_PROBE else "nur Lesen")
+
+    # Der Schalter soll unangenehm sein: wer schreibt, sieht es als Erstes im
+    # Protokoll, mit Knoten und Element im Klartext.
+    if enable_write_probe:
+        log.warning("=" * 78)
+        log.warning("SCHREIBPROBE AKTIV (--write-probe)")
+        log.warning(
+            "  Ein Set-Kommando auf ':INPut:VOLTage:RANGe:ELEMent%d' geht hinaus.",
+            PROBE_ELEMENT,
+        )
+        log.warning("  Geschrieben wird der bereits eingestellte Wert - Nulleffekt.")
+        log.warning("  Der Ausgangszustand wird vorher gesichert und danach geprueft.")
+        log.warning("=" * 78)
+    else:
+        log.info("Stufe 5b - Messbereiche erfassen (nur Lesen, keine Schreibprobe)")
 
     try:
         with TmctlTransport(config) as transport:
             # Die Sitzung wird nur dann schreibfaehig geoeffnet, wenn die
             # Schreibprobe ausdruecklich verlangt ist.
-            session = WTSession(transport, config, read_only=not ENABLE_NOOP_WRITE_PROBE)
+            session = WTSession(transport, config, read_only=not enable_write_probe)
 
             access = RangeAccess(session, allow_changes=False)
             report_environment(access, log)
             backup = report_ranges(access, log)
             backup.save(backup_file)
 
-            if ENABLE_NOOP_WRITE_PROBE:
+            if enable_write_probe:
                 run_noop_write_probe(session, backup, log)
 
             session.assert_no_error("Bereichserfassung")
@@ -150,4 +200,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(enable_write_probe=_parse_args().write_probe))

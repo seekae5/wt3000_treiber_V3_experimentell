@@ -31,11 +31,12 @@
 from __future__ import annotations
 
 import ctypes as ct
+import json
 import logging
 import os
 import struct
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from types import TracebackType
 from typing import Protocol, runtime_checkable
@@ -56,23 +57,209 @@ MAX_PROGRAM_MESSAGE_BYTES: int = 1024
 # ---------------------------------------------------------------------------
 
 
+#: Name der Konfigurationsdatei, die from_environment() sucht.
+CONFIG_FILE_NAME: str = "wt3000.json"
+
+#: Umgebungsvariable -> Feld von WTConfig. Der Name der Variablen ist bewusst
+#: das Feld in Grossschrift mit Praefix; damit ist die Zuordnung ohne Tabelle
+#: erratbar.
+ENV_PREFIX: str = "WT3000_"
+
+
 @dataclass(frozen=True)
 class WTConfig:
-    """Verbindungs- und Laufzeitparameter. Hier zentral anpassen."""
+    """Verbindungs- und Laufzeitparameter.
 
-    dll_path: str = r"C:\Users\Persystems\PycharmProjects\WT3000_SCPI\tmctl8020\dll\tmctl64.dll"
-    ip: str = "192.168.10.20"
-    user: str = "TEST"
-    password: str = "1"
+    Die Voreinstellungen sind bewusst NEUTRAL: keine IP, keine Zugangsdaten,
+    kein rechnerspezifischer DLL-Pfad. Wo diese Werte herkommen, entscheidet
+    from_environment() - siehe dort. Ein 'WTConfig()' ohne Argumente ist
+    deshalb NICHT verbindungsfaehig; es ist der Ausgangspunkt, auf den die
+    Auflaesungskette ihre Werte legt.
+
+    Hintergrund (Befund BF-M2): hier standen bis P-7 eine feste Labor-IP, ein
+    Benutzername mit Passwort und ein DLL-Pfad aus dem Benutzerverzeichnis
+    eines bestimmten Rechners. Auf jedem zweiten Rechner war der Treiber damit
+    nur durch Quelltextaenderung benutzbar, und die Zugangsdaten lagen in der
+    Versionsverwaltung.
+    """
+
+    #: Pfad ODER blosser Dateiname. Ein blosser Name wird von Windows selbst
+    #: gesucht (PATH, Anwendungsverzeichnis) - siehe resolve_dll_path().
+    dll_path: str = "tmctl64.dll"
+    #: Ohne IP ist keine Verbindung moeglich; TmctlTransport bricht dann mit
+    #: einer Meldung ab, die auf die Auflaesungskette verweist.
+    ip: str = ""
+    #: Leer, wenn das Geraet ohne Anmeldung erreichbar ist.
+    user: str = ""
+    password: str = ""
     # ZU VERIFIZIEREN: Einheit von TmcSetTimeout (ms angenommen).
     timeout_ms: int = 5000
     drain_timeout_ms: int = 500
     read_buffer_size: int = 64 * 1024
     # ZU VERIFIZIEREN: Ob das Geraet Set-Kommandos ueber Ethernet auch ohne
-    # ':COMMunicate:REMote ON' annimmt. Falls Schreibzugriffe abgelehnt werden,
-    # hier auf True setzen. Wird dann beim Beenden zwingend wieder abgeschaltet.
-    # Offener Punkt der ROADMAP: M0-3.
+    # ':COMMunicate:REMote ON' annimmt. Offener Punkt der ROADMAP: M0-3.
     use_remote: bool = True
+
+    # -- Auflaesungskette ---------------------------------------------------
+
+    @classmethod
+    def from_environment(
+        cls, config_file: "str | Path | None" = None, **overrides: object
+    ) -> "WTConfig":
+        """Verbindungsparameter aus der Umgebung zusammensetzen.
+
+        RANGFOLGE, von stark nach schwach:
+
+          1. ausdruecklicher Parameter   from_environment(ip="10.0.0.5")
+          2. Umgebungsvariable           WT3000_IP=10.0.0.5
+          3. Konfigurationsdatei         wt3000.json  {"ip": "10.0.0.5"}
+          4. Voreinstellung der Klasse   (neutral, siehe oben)
+
+        Die Datei wird in dieser Reihenfolge gesucht: der Pfad aus
+        'config_file', dann WT3000_CONFIG, dann './wt3000.json', dann
+        '~/wt3000.json'. Die erste vorhandene gewinnt; fehlt sie ueberall,
+        ist das kein Fehler.
+
+        Umgebungsvariablen heissen wie das Feld in Grossschrift mit Praefix:
+        WT3000_IP, WT3000_DLL_PATH, WT3000_USER, WT3000_PASSWORD,
+        WT3000_TIMEOUT_MS, WT3000_USE_REMOTE, ...
+
+        Bewusst eine Klassenmethode und kein Verhalten von __init__: WTConfig
+        bleibt eine reine Datenklasse, und der blosse Import dieses Moduls
+        liest weder Umgebung noch Dateisystem.
+        """
+        werte: dict[str, object] = dict(_config_file_values(config_file))
+        werte.update(_environment_values())
+        werte.update({k: v for k, v in overrides.items() if v is not None})
+        return cls(**werte)  # type: ignore[arg-type]
+
+    def with_values(self, **overrides: object) -> "WTConfig":
+        """Kopie mit geaenderten Feldern. 'None' laesst das Feld unveraendert."""
+        gesetzt = {k: v for k, v in overrides.items() if v is not None}
+        return replace(self, **gesetzt)  # type: ignore[arg-type]
+
+    def describe(self) -> str:
+        """Kurzform fuer Protokolle - OHNE Passwort."""
+        anmeldung = f", Benutzer {self.user}" if self.user else ", ohne Anmeldung"
+        return f"{self.ip or '<keine IP>'}{anmeldung}, DLL {self.dll_path}"
+
+
+# ---------------------------------------------------------------------------
+# Die Auflaesungskette im Einzelnen
+# ---------------------------------------------------------------------------
+
+#: Umwandlung Text -> Feldwert. Alles, was nicht hier steht, bleibt Text.
+_FELD_TYPEN: dict[str, "Callable[[str], object]"] = {
+    "timeout_ms": int,
+    "drain_timeout_ms": int,
+    "read_buffer_size": int,
+    "use_remote": lambda text: text.strip().lower() in {"1", "true", "yes", "on", "ja"},
+}
+
+
+def _felder() -> tuple[str, ...]:
+    """Feldnamen von WTConfig - eine Quelle fuer Umgebung und Datei."""
+    return tuple(f.name for f in fields(WTConfig))
+
+
+def _wandeln(feld: str, text: str) -> object:
+    """Textwert in den Feldtyp wandeln, mit verstaendlicher Meldung."""
+    wandler = _FELD_TYPEN.get(feld)
+    if wandler is None:
+        return text
+    try:
+        return wandler(text)
+    except ValueError as exc:
+        raise WTError(
+            f"Wert fuer '{feld}' ist nicht auswertbar: {text!r}"
+        ) from exc
+
+
+def _environment_values() -> dict[str, object]:
+    """Gesetzte WT3000_*-Variablen einsammeln. Leere Werte zaehlen nicht."""
+    werte: dict[str, object] = {}
+    for feld in _felder():
+        rohwert = os.environ.get(f"{ENV_PREFIX}{feld.upper()}")
+        if rohwert is not None and rohwert.strip() != "":
+            werte[feld] = _wandeln(feld, rohwert)
+    return werte
+
+
+def _config_file_path(config_file: "str | Path | None") -> "Path | None":
+    """Erste vorhandene Konfigurationsdatei der Suchreihenfolge."""
+    kandidaten: list[Path] = []
+    if config_file is not None:
+        kandidaten.append(Path(config_file))
+    aus_umgebung = os.environ.get(f"{ENV_PREFIX}CONFIG")
+    if aus_umgebung:
+        kandidaten.append(Path(aus_umgebung))
+    kandidaten.append(Path.cwd() / CONFIG_FILE_NAME)
+    kandidaten.append(Path.home() / CONFIG_FILE_NAME)
+
+    for pfad in kandidaten:
+        if pfad.is_file():
+            return pfad
+    # Ein ausdruecklich benannter Pfad, den es nicht gibt, ist ein Fehler -
+    # sonst laeuft der Aufrufer still mit den Voreinstellungen weiter.
+    if config_file is not None and not Path(config_file).is_file():
+        raise WTError(f"Konfigurationsdatei nicht gefunden: {config_file}")
+    return None
+
+
+def _config_file_values(config_file: "str | Path | None") -> dict[str, object]:
+    """Werte aus der Konfigurationsdatei lesen. Fehlt sie, ist das in Ordnung."""
+    pfad = _config_file_path(config_file)
+    if pfad is None:
+        return {}
+    try:
+        inhalt = json.loads(pfad.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise WTError(f"Konfigurationsdatei {pfad} ist nicht lesbar: {exc}") from exc
+    if not isinstance(inhalt, dict):
+        raise WTError(f"Konfigurationsdatei {pfad} enthaelt kein JSON-Objekt")
+
+    bekannt = set(_felder())
+    # JSON kennt keine Kommentare. Schluessel mit fuehrendem '_' gelten
+    # deshalb als solche und werden stillschweigend uebergangen - so laesst
+    # sich 'wt3000.example.json' mit Erklaertext ausliefern.
+    unbekannt = sorted(k for k in set(inhalt) - bekannt if not k.startswith("_"))
+    if unbekannt:
+        logging.getLogger("wt3000.transport").warning(
+            "Konfigurationsdatei %s: unbekannte Schluessel uebergangen: %s",
+            pfad,
+            ", ".join(unbekannt),
+        )
+    return {
+        feld: _wandeln(feld, wert) if isinstance(wert, str) else wert
+        for feld, wert in inhalt.items()
+        if feld in bekannt
+    }
+
+
+def resolve_dll_path(dll_path: str) -> "str | Path":
+    """Angabe aus WTConfig.dll_path in etwas Ladbares uebersetzen.
+
+    Zwei Faelle, bewusst unterschieden:
+
+      Pfadangabe (enthaelt einen Trenner)  muss existieren. Sonst laedt ctypes
+                                           irgendetwas oder nichts, und die
+                                           Meldung waere unbrauchbar.
+      blosser Dateiname                    wird durchgereicht. Windows sucht
+                                           dann selbst in PATH und im
+                                           Anwendungsverzeichnis - der uebliche
+                                           Weg fuer eine installierte TMCTL.
+    """
+    kandidat = Path(dll_path)
+    if len(kandidat.parts) <= 1:
+        return dll_path
+    if not kandidat.is_file():
+        raise WTError(
+            f"TMCTL-DLL nicht gefunden: {kandidat}. Pfad setzen ueber "
+            f"{ENV_PREFIX}DLL_PATH, ueber '{CONFIG_FILE_NAME}' oder als "
+            "Parameter. Ein blosser Dateiname ('tmctl64.dll') laesst Windows "
+            "selbst suchen."
+        )
+    return kandidat
 
 
 # ---------------------------------------------------------------------------
@@ -162,15 +349,22 @@ class TmctlTransport:
         self._device_id = ct.c_int(0)
         self._open = False
 
-        dll_path = Path(config.dll_path)
-        if not dll_path.is_file():
-            raise WTError(f"TMCTL-DLL nicht gefunden: {dll_path}")
+        if not config.ip:
+            raise WTError(
+                "Keine IP-Adresse gesetzt. WTConfig() allein ist nicht "
+                f"verbindungsfaehig - {ENV_PREFIX}IP setzen, '{CONFIG_FILE_NAME}' "
+                "anlegen oder WTConfig.from_environment(ip=...) benutzen."
+            )
 
-        # Abhaengige DLLs liegen ueblicherweise im selben Verzeichnis.
-        if hasattr(os, "add_dll_directory"):
-            os.add_dll_directory(str(dll_path.parent))
+        dll = resolve_dll_path(config.dll_path)
 
-        self._tm = ct.WinDLL(str(dll_path))
+        # Abhaengige DLLs liegen ueblicherweise im selben Verzeichnis. Bei
+        # einem blossen Dateinamen gibt es kein Verzeichnis, das man ergaenzen
+        # koennte - dann sucht Windows selbst.
+        if isinstance(dll, Path) and hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(str(dll.parent))
+
+        self._tm = ct.WinDLL(str(dll))
         self._declare_prototypes()
         self._initialize()
 
