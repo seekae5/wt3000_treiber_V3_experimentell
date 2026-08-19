@@ -3,6 +3,8 @@
 # traf auch kuenftige Konfigurationsdateien im Quellbaum.
 messungen/
 konfiguration/
+*.txt
+*.json
 
 # Python
 __pycache__/
