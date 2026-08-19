@@ -24,22 +24,94 @@
 #   Layer 3    wt3000_itemspec  Ablauf um die Item-Tabelle
 #              wt3000_ranging   Ablauf um die Messbereiche
 #              wt3000_measure   Messschleife und CSV
-#   Layer 4    stage2..stage5b  ausfuehrbare Stufenskripte
+#   UEBERARBEITET (ROADMAP M1-1): Layer 4 hat einen zweiten Bewohner.
+#   Layer 4    wt3000_device    Fassade WT3000 - der Einstiegspunkt
+#              stage2..stage5b  ausfuehrbare Stufenskripte
 #
 # Aufruf der Stufenskripte nach der Umstellung:
 #     python -m wt3000_scpi.stage2_read_numeric
 #     python -m wt3000_scpi.stage5b_range_probe
 #
-# Dieses Modul importiert BEWUSST nichts aus wt3000_core: der Transport laedt
-# 'tmctl.dll' erst bei Instanziierung, aber schon der Modulimport soll auf
-# einem Rechner ohne Geraet nichts voraussetzen. Wer die Fachmodule braucht,
-# importiert sie einzeln:
+# UEBERARBEITET (ROADMAP M1-1): dieses Modul importierte bis hierher BEWUSST
+# nichts aus dem Paket, damit ein Rechner ohne Geraet und ohne 'tmctl.dll' es
+# trotzdem importieren kann. Diese Eigenschaft bleibt erhalten - sie haengt
+# aber nicht am Verzicht auf Importe, sondern daran, dass KEIN Fachmodul beim
+# Import etwas voraussetzt (TmctlTransport laedt die DLL erst bei
+# Instanziierung; tests/test_package_layout.py haelt genau das fest). Deshalb
+# koennen die Namen, die ein Anwender braucht, jetzt hier stehen:
+#
+#     from wt3000_scpi import WT3000, WTConfig, Quantity, WTError
+#
+#     with WT3000.connect(ip="192.168.10.20") as wt:
+#         wt.device.log_summary()
+#
+# Alles Uebrige bleibt in den Fachmodulen und wird von dort importiert:
 #     from wt3000_scpi.wt3000_ranging import RangePlan, RangeSpec
 # =============================================================================
 
 from __future__ import annotations
 
-__all__ = ["__version__", "MODULES"]
+# NEU (M1-1): die Fassade und das, was ein Aufrufer um sie herum braucht -
+# Verbindungsparameter, Fehlerklassen, Aufzaehlungen. Bewusst KEIN
+# Sammelexport der Ablauffunktionen: wer Bereichsplaene oder die Item-Tabelle
+# von Hand baut, importiert aus dem zustaendigen Fachmodul und sieht damit
+# schon am Import, in welcher Schicht er arbeitet.
+from .wt3000_core import (
+    DeviceError,
+    ProtocolError,
+    ReadOnlyViolation,
+    TmctlError,
+    TmctlTransport,
+    Transport,
+    WTConfig,
+    WTError,
+    WTSession,
+)
+from .wt3000_device import DeviceInfo, ItemAccess, MeasureControl, WT3000
+from .wt3000_input import (
+    ConfigLocked,
+    LineFilter,
+    MeasMode,
+    SyncSource,
+    VerificationError,
+    Wiring,
+)
+from .wt3000_numeric import NumericValue, ValueStatus
+from .wt3000_rangeio import ChangesNotAllowed, Quantity
+from .wt3000_transport import FakeTransport
+
+__all__ = [
+    "__version__",
+    "MODULES",
+    # Fassade (M1-1)
+    "WT3000",
+    "DeviceInfo",
+    "ItemAccess",
+    "MeasureControl",
+    # Verbindung
+    "WTConfig",
+    "WTSession",
+    "Transport",
+    "TmctlTransport",
+    "FakeTransport",
+    # Fehlerklassen
+    "WTError",
+    "TmctlError",
+    "ProtocolError",
+    "DeviceError",
+    "ReadOnlyViolation",
+    "ConfigLocked",
+    "ChangesNotAllowed",
+    "VerificationError",
+    # Aufzaehlungen und Werttypen
+    "Quantity",
+    "Wiring",
+    "SyncSource",
+    "LineFilter",
+    "MeasMode",
+    "ValueStatus",
+    "NumericValue",
+]
 
 __version__ = "0.3.0"
 
@@ -56,4 +128,6 @@ MODULES: tuple[str, ...] = (
     "wt3000_itemspec",
     "wt3000_ranging",
     "wt3000_measure",
+    # NEU (M1-1): die Fassade.
+    "wt3000_device",
 )

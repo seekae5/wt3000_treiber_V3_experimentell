@@ -41,6 +41,22 @@ LAYERS: dict[str, set[str]] = {
         "wt3000_numeric",
         "wt3000_itemspec",
     },
+    # NEU (ROADMAP M1-1): die Fassade ist Layer 4 und darf deshalb aus allen
+    # Schichten darunter importieren - aber aus keinem Stufenskript und aus
+    # keinem zweiten Layer-4-Modul. Genau das haelt dieser Eintrag fest: die
+    # Fassade buendelt die Fachmodule, sie ergaenzt sie nicht um eigene
+    # Geraetekenntnis.
+    "wt3000_device": {
+        "wt3000_transport",
+        "wt3000_core",
+        "wt3000_common",
+        "wt3000_numeric",
+        "wt3000_rangeio",
+        "wt3000_input",
+        "wt3000_itemspec",
+        "wt3000_ranging",
+        "wt3000_measure",
+    },
 }
 
 

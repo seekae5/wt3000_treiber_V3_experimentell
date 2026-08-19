@@ -1,6 +1,6 @@
 # Roadmap — vom Stufenskript zur Treiberbibliothek
 
-**Stand:** 2026-08-18, `wt3000-scpi 0.3.0`
+**Stand:** 2026-08-19, `wt3000-scpi 0.3.0` (M1-2 und M1-1 umgesetzt)
 **Bezug:** [AENDERUNGEN_2026-08-18.md](AENDERUNGEN_2026-08-18.md) (Fehlerprüfung, Befunde B-01…B-15)
 
 **Zielbild.** Der fertige Treiber kann fünf Dinge:
@@ -109,24 +109,42 @@ denselben Knoten. Höchstens eine Form kann richtig sein.
 
 ## M1 — Fundament
 
-### M1-1 — Fassade `WT3000` als einziger Einstiegspunkt `M`
-**Das ist die wichtigste fehlende Funktion überhaupt.** Heute muss ein Anwender
+### M1-1 — Fassade `WT3000` als einziger Einstiegspunkt `M` — **umgesetzt 2026-08-19**
+**Das ist die wichtigste fehlende Funktion überhaupt.** Bis hierher musste ein Anwender
 Transport, Sitzung, `InputConfig`, `RangeAccess` und die Wiring-Units von Hand
-zusammenstecken; `__init__.py` exportiert nur `__version__` und `MODULES`.
+zusammenstecken; `__init__.py` exportierte nur `__version__` und `MODULES`.
 
-- Neues Modul `wt3000_device.py` (Layer 4) mit einer Klasse `WT3000`
-- Konstruktion über Klassenmethoden statt vieler Parameter:
-  `WT3000.connect(ip=..., read_only=True)` und `WT3000.from_config(WTConfig(...))`
-- Context Manager: `with WT3000.connect(...) as wt:` — schließt Transport, schaltet
-  REMote ab, schaltet HOLD ab, stellt geänderten Sollzustand zurück
-- Eigenschaften statt Objektgeflecht: `wt.input`, `wt.ranges`, `wt.items`, `wt.device`,
-  `wt.measure` — jede liefert das passende, bereits verdrahtete Fachobjekt
-- Die heute manuelle Verdrahtung `sigma_members_from_units(cfg.get_wiring_units())`
-  passiert intern und einmalig beim Verbinden
-- `__init__.py` exportiert `WT3000`, `WTConfig`, die Fehlerklassen und die
+- [x] Neues Modul `wt3000_device.py` (Layer 4) mit einer Klasse `WT3000`
+- [x] Konstruktion über Klassenmethoden statt vieler Parameter:
+  `WT3000.connect(ip=..., read_only=True)` und `WT3000.from_config(WTConfig(...))`.
+  Zusatz: `WT3000.from_transport(...)` setzt auf einen bestehenden Transport auf —
+  damit läuft die Fassade auf `FakeTransport` (M1-2) und ist gerätefrei prüfbar
+- [x] Context Manager: `with WT3000.connect(...) as wt:` — schaltet HOLD ab, schaltet
+  REMote ab, schließt den Transport. Jeder Schritt in eigenem `try`, damit ein
+  misslungener die folgenden nicht überspringt
+- [x] Eigenschaften statt Objektgeflecht: `wt.input`, `wt.ranges`, `wt.items`,
+  `wt.device`, `wt.measure` — jede liefert das passende, bereits verdrahtete
+  Fachobjekt. `wt.items` und `wt.measure` sind dafür neu (`ItemAccess`,
+  `MeasureControl`): die Abläufe in `wt3000_itemspec`/`wt3000_measure` sind freie
+  Funktionen mit `session` als erstem Parameter und hatten kein Objekt
+- [x] Die bisher manuelle Verdrahtung `sigma_members_from_units(cfg.get_wiring_units())`
+  passiert intern und einmalig beim Verbinden, in `DeviceInfo.read()`
+- [x] `__init__.py` exportiert `WT3000`, `WTConfig`, die Fehlerklassen und die
   Aufzählungen; `MODULES` bleibt für den Importtest
-- **Fertig, wenn:** ein Anwender mit fünf Zeilen eine Verbindung aufbaut, die
-  Konfiguration liest und sauber wieder trennt
+- [x] Sollzustand **geprüft** (`wt.check_protocol_state()`) — der designierte Ort für
+  Befund B-14 und die Grundlage für M1-4, das ihn dann auch herstellt
+- [x] **Fertig, wenn:** ein Anwender mit fünf Zeilen eine Verbindung aufbaut, die
+  Konfiguration liest und sauber wieder trennt — `tests/test_device_facade.py`,
+  23 Testfälle; Suite gesamt 176 statt 151
+
+Vorgezogen aus M1-3, weil die Fassade die Elementliste ohnehin festlegen muss:
+`DeviceInfo` liest `:INPut:MODUle?` und gibt `RangeAccess` nur die **bestückten**
+Elemente. `InputConfig._elements_of("ALL")` hängt weiter an der Konstanten
+(Befund B-12), ebenso die Bereichstabellen (B-09) — das bleibt M1-3.
+Einzige Änderung an einem bestehenden Fachmodul: `InputConfig.get_modules()`,
+damit die Fassade `:INPut:MODUle?` nicht ein viertes Mal selbst zerlegt (B-03).
+
+Siehe [AENDERUNGEN_2026-08-19_M1-1.md](AENDERUNGEN_2026-08-19_M1-1.md).
 
 ### M1-2 — Transport hinter ein Protokoll legen `M` — **umgesetzt 2026-08-19**
 Heute ist `TmctlTransport` fest verdrahtet: `ctypes.WinDLL` und `os.add_dll_directory`

@@ -636,6 +636,19 @@ class InputConfig:
             raise WTError(f"Kein Elementtyp fuer Element {element} bekannt")
         return self._module_cache[element]
 
+    # NEU (ROADMAP M1-1): die Fassade braucht die Elementtypen als Ganzes, um
+    # bestueckte von unbestueckten Elementen zu unterscheiden. Ohne diese
+    # Methode muesste sie ':INPut:MODUle?' selbst parsen - das waere die vierte
+    # Fassung derselben Regel (vgl. Befund B-03).
+    def get_modules(self) -> dict[int, int]:
+        """Elementtypen aller gemeldeten Elemente: {Elementnummer: 30|2|0}.
+
+        0 bedeutet 'nicht bestueckt'. Benutzt denselben Cache wie get_module().
+        """
+        if self._module_cache is None:
+            self.get_module(1)  # fuellt den Cache, wirft bei leerer Antwort
+        return dict(self._module_cache or {})
+
     def get_update_rate(self) -> float:
         """Datenaktualisierungsintervall in Sekunden."""
         return parse_float(self._query(":RATE"))
