@@ -11,7 +11,11 @@
 # Projektbestand heraus nicht geloescht werden, weil er hier nicht vorliegt.
 #
 # SCHICHTUNG (Importrichtung ausnahmslos nach unten, azyklisch):
-#   Layer 0/1  wt3000_core      Transport, Sitzung, Fehlerklassen - kennt kein
+#   UEBERARBEITET (ROADMAP M1-2): Layer 0 ist ein eigenes Modul geworden.
+#   Layer 0    wt3000_transport Protocol 'Transport', TmctlTransport,
+#                               FakeTransport, WTConfig - importiert nichts
+#                               aus dem Paket
+#   Layer 1    wt3000_core      Sitzung (WTSession), Fehlerklassen - kennt kein
 #                               einziges WT3000-Kommando
 #   Layer 1    wt3000_common    geraeteunabhaengige Querschnittsregeln
 #   Layer 2    wt3000_numeric   ':NUMeric'-Knoten und Messwertbloecke
@@ -42,6 +46,8 @@ __version__ = "0.3.0"
 # Die Fachmodule des Pakets, in Schichtreihenfolge. Dient der Dokumentation und
 # dem Importtest in tests/test_package_layout.py.
 MODULES: tuple[str, ...] = (
+    # NEU (M1-2): Layer 0.
+    "wt3000_transport",
     "wt3000_core",
     "wt3000_common",
     "wt3000_numeric",

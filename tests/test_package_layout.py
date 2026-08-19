@@ -23,7 +23,12 @@ PACKAGE_DIR = Path(wt3000_scpi.__file__).parent
 
 # Erlaubte Importe je Modul - die Schichtung aus dem Kopf von __init__.py.
 LAYERS: dict[str, set[str]] = {
-    "wt3000_core": set(),
+    # NEU (ROADMAP M1-2): 'wt3000_transport' ist die neue unterste Schicht und
+    # darf aus dem Paket gar nichts importieren - sonst zeigt Layer 0 nach oben
+    # und der Zweck des Protocols (geraetefreie Testbarkeit) ist dahin.
+    "wt3000_transport": set(),
+    # UEBERARBEITET (M1-2): war set(), solange der Transport hier drinlag.
+    "wt3000_core": {"wt3000_transport"},
     "wt3000_common": {"wt3000_core"},
     "wt3000_numeric": {"wt3000_core"},
     "wt3000_rangeio": {"wt3000_core", "wt3000_common"},

@@ -128,22 +128,34 @@ zusammenstecken; `__init__.py` exportiert nur `__version__` und `MODULES`.
 - **Fertig, wenn:** ein Anwender mit fünf Zeilen eine Verbindung aufbaut, die
   Konfiguration liest und sauber wieder trennt
 
-### M1-2 — Transport hinter ein Protokoll legen `M`
+### M1-2 — Transport hinter ein Protokoll legen `M` — **umgesetzt 2026-08-19**
 Heute ist `TmctlTransport` fest verdrahtet: `ctypes.WinDLL` und `os.add_dll_directory`
 machen den Treiber auf Windows festgenagelt und für Tests unerreichbar.
 
-- `typing.Protocol` namens `Transport` mit `write/read/query/set_timeout/close` in ein
-  eigenes Modul (Layer 0)
-- `TmctlTransport` implementiert es unverändert weiter
-- `FakeTransport` als zweite Implementierung: beantwortet Kommandos aus einer Tabelle,
+- [x] `typing.Protocol` namens `Transport` mit `write/read/query/set_timeout/close` in ein
+  eigenes Modul (Layer 0) — `src/wt3000_scpi/wt3000_transport.py`
+- [x] `TmctlTransport` implementiert es unverändert weiter — inhaltlich unverändert aus
+  `wt3000_core` dorthin verschoben. `wt3000_core` reicht alle verschobenen Namen
+  (`WTConfig`, `TmctlTransport`, `WTError`, `TmctlError`, `ProtocolError`,
+  `TM_CTL_ETHER`, `MAX_PROGRAM_MESSAGE_BYTES`) unverändert weiter, damit bestehende
+  Importe und `except WTError` wortgleich weiterfunktionieren
+- [x] `FakeTransport` als zweite Implementierung: beantwortet Kommandos aus einer Tabelle,
   merkt sich Geschriebenes, kann Blockdaten und Fehlerqueue nachbilden. Damit werden
   `WTSession`, `query_block()` und die gesamte Messschleife **ohne Gerät** testbar —
-  heute testet `FakeSession` erst eine Ebene darüber
-- Platzhalter für später: `SocketTransport` (VXI-11/Raw-Socket) und `VisaTransport`.
-  Nicht bauen, nur die Fuge offenlassen
-- `WTSession` bekommt den Transport als `Transport`-Protokoll statt als konkrete Klasse
-- **Fertig, wenn:** die Testsuite eine vollständige Messschleife gegen `FakeTransport`
-  durchspielt, inklusive Item-Tabelle und CSV
+  heute testet `FakeSession` erst eine Ebene darüber. Zusatz: `chunk_size` zerlegt jede
+  Antwort in mehrere Lesevorgänge und erreicht damit erstmals die Nachlese-Schleife in
+  `_assemble_block()`; `float_block()` ist das Gegenstück zu `parse_float_block()`
+- [x] Platzhalter für später: `SocketTransport` (VXI-11/Raw-Socket) und `VisaTransport`.
+  Nicht bauen, nur die Fuge offenlassen — als auskommentierte Klassenrümpfe am Modulende
+- [x] `WTSession` bekommt den Transport als `Transport`-Protokoll statt als konkrete Klasse
+- [x] **Fertig, wenn:** die Testsuite eine vollständige Messschleife gegen `FakeTransport`
+  durchspielt, inklusive Item-Tabelle und CSV — `tests/test_fake_transport.py`,
+  23 Testfälle; Suite gesamt 151 statt 125
+
+Bewusst offen geblieben, gehört nicht in diesen Schritt: `FakeSession` in
+`tests/conftest.py` bleibt bestehen — die vorhandenen Tests der Fachmodule benutzen sie
+und sollen hier nicht mitwandern. Der auskommentierte Originalblock am Ende von
+`wt3000_core.py` ist beim nächsten Aufräumen ersatzlos zu löschen.
 
 ### M1-3 — Gerätesteckbrief statt harter Annahmen `M`
 An mehreren Stellen steht heute „vier Elemente, 30-A-Module, V3A3,P1W2" fest im Code:
