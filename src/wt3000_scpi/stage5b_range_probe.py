@@ -42,7 +42,7 @@ from .wt3000_rangeio import Quantity, RangeAccess
 # True sendet GENAU EIN Set-Kommando mit dem bereits eingestellten Wert.
 # Kein Messwert und keine Eichung aendert sich dadurch. Trotzdem bewusst
 # abschaltbar, damit der erste Lauf am echten Geraet rein lesend bleibt.
-ENABLE_NOOP_WRITE_PROBE: bool = False
+ENABLE_NOOP_WRITE_PROBE: bool = True
 
 # Zielverzeichnis fuer Bericht, Backup und Protokoll.
 OUTPUT_DIR: Path = Path.cwd() / "konfiguration"
@@ -149,4 +149,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main())
