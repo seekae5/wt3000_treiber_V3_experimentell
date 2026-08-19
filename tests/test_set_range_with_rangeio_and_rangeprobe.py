@@ -22,9 +22,9 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from .wt3000_common import setup_logging
-from .wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
-from .wt3000_rangeio import Quantity, RangeAccess
+from wt3000_scpi.wt3000_common import setup_logging
+from wt3000_scpi.wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
+from wt3000_scpi.wt3000_rangeio import Quantity, RangeAccess
 
 # ---------------------------------------------------------------------------
 # Laufparameter
