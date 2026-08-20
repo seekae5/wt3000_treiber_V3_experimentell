@@ -1,5 +1,11 @@
 # WT3000 Communication Commands Übersicht
 
+**Rolle dieses Dokuments:** kompakte Geräte-Referenz, keine Aussage darüber, welche
+Kommandos der Treiber bereits implementiert oder am vorhandenen WT3000 erprobt hat.
+Mit **(prüfen)** markierte Aufgaben und die Implementierungsreihenfolge stehen in
+[ROADMAP.md](ROADMAP.md); offene Gerätebelege in
+[OFFENE_PUNKTE.md](OFFENE_PUNKTE.md).
+
 Diese Übersicht wurde auf maximal geringen Token-Verbrauch optimiert.
 Um Redundanz zu vermeiden:
 - `?` am Ende bedeutet "Query" (Abfrage).
