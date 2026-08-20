@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,51 @@ LAYERS: dict[str, set[str]] = {
         "wt3000_measure",
         "wt3000_sinks",
     },
+    # NEU (Schritt 0a aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-11): die fuenf
+    # Stufenskripte. Sie fehlten hier, seit es sie gibt - 'LAYERS' fuehrte 11
+    # von 16 Modulen, und die fehlenden fuenf waren exakt die Skripte. Ein
+    # Stufenskript durfte damit 'wt3000_device' importieren oder ein zweites
+    # Stufenskript, ohne dass ein Test anschlug: der Test, der die Schichtung
+    # traegt, liess genau die Module aus, die am haeufigsten angefasst werden.
+    #
+    # Die Eintraege bilden den heutigen Bestand ab, sie sind also beim Anlegen
+    # sofort gruen. Das ist Absicht - sie sichern, was schon gilt.
+    #
+    # Bewusst NICHT enthalten und der eigentliche Zweck dieser fuenf Zeilen:
+    #
+    #   * 'wt3000_device'. Die Fassade ist Layer 4, genau wie die Stufen. Ein
+    #     Stufenskript, das sie importiert, waere ein Querimport innerhalb
+    #     derselben Schicht. Der Eintrag 'wt3000_device' oben haelt dieselbe
+    #     Regel fuer die Gegenrichtung fest ("aus keinem Stufenskript und aus
+    #     keinem zweiten Layer-4-Modul"); ab hier gilt sie in beide Richtungen.
+    #
+    #   * jedes andere Stufenskript. Gemeinsames gehoert nach 'wt3000_common'
+    #     (Layer 1) oder in die Fassade, nie quer. Das wird ab Schritt 8 des
+    #     Plans wichtig, wenn alle sieben main() eine gemeinsame Signatur
+    #     bekommen und die Versuchung entsteht, "gemeinsamen Code" zwischen
+    #     zwei Stufen zu teilen.
+    "stage2_read_numeric": {"wt3000_core", "wt3000_common", "wt3000_numeric"},
+    "stage3_own_itemtable": {
+        "wt3000_core",
+        "wt3000_common",
+        "wt3000_numeric",
+        "wt3000_itemspec",
+    },
+    "stage4_measure": {
+        "wt3000_core",
+        "wt3000_common",
+        "wt3000_numeric",
+        "wt3000_itemspec",
+        "wt3000_measure",
+        "wt3000_sinks",
+    },
+    "stage5_input_config": {"wt3000_core", "wt3000_common", "wt3000_input"},
+    "stage5b_range_probe": {
+        "wt3000_core",
+        "wt3000_common",
+        "wt3000_rangeio",
+        "wt3000_ranging",
+    },
 }
 
 
@@ -105,6 +151,26 @@ def test_kein_absoluter_geschwisterimport(pfad):
                 )
 
 
+def test_layers_deckt_jedes_modul_ab():
+    """NEU (Schritt 0a, Befund A-11): die Deckung selbst ist jetzt geprueft.
+
+    Der Befund war nicht, dass fuenf Eintraege fehlten - sondern dass das
+    niemandem auffiel. 'test_importrichtung_zeigt_nach_unten' ist ueber
+    sorted(LAYERS) parametrisiert und prueft damit genau so viele Module, wie
+    jemand eingetragen hat: ein neues Modul ohne Eintrag laesst die Suite
+    gruen. Dieser Pruefsatz schliesst den Kreis, indem er LAYERS gegen den
+    tatsaechlichen Bestand haelt.
+    """
+    vorhanden = {p.stem for p in modul_dateien()}
+    fehlend = vorhanden - set(LAYERS)
+    verwaist = set(LAYERS) - vorhanden
+    assert not fehlend, (
+        f"Ohne Eintrag in LAYERS und damit ungeprueft: {sorted(fehlend)}. "
+        "Jedes Paketmodul braucht eine Zeile - auch ein Stufenskript."
+    )
+    assert not verwaist, f"LAYERS nennt Module, die es nicht gibt: {sorted(verwaist)}"
+
+
 @pytest.mark.parametrize("name", sorted(LAYERS))
 def test_importrichtung_zeigt_nach_unten(name):
     quelle = (PACKAGE_DIR / f"{name}.py").read_text(encoding="utf-8")
@@ -119,12 +185,49 @@ def test_importrichtung_zeigt_nach_unten(name):
     assert not unerlaubt, f"{name} importiert aus einer hoeheren Schicht: {unerlaubt}"
 
 
+STUFENSKRIPTE = (
+    "stage2_read_numeric",
+    "stage3_own_itemtable",
+    "stage4_measure",
+    "stage5_input_config",
+    "stage5b_range_probe",
+)
+
+
 def test_stufenskripte_fuehren_beim_import_nichts_aus():
     """Layer 4 darf erst ueber main() aktiv werden, nicht beim Import."""
-    for name in ("stage2_read_numeric", "stage3_own_itemtable", "stage4_measure",
-                 "stage5_input_config", "stage5b_range_probe"):
+    for name in STUFENSKRIPTE:
         modul = importlib.import_module(f"wt3000_scpi.{name}")
         assert callable(modul.main)
+
+
+@pytest.mark.parametrize("name", STUFENSKRIPTE)
+def test_import_legt_keine_datei_an(name, tmp_path, monkeypatch):
+    """UEBERARBEITET (Schritt 0b, Befund A-10): die Zusage ist jetzt geprueft.
+
+    Bis hierher stellte der Test darueber nur fest, dass 'main' aufrufbar ist -
+    das ist keine Aussage darueber, ob der Import etwas TUT. Und er tut etwas:
+    seit Schritt 0b legt jedes der fuenf Skripte 'OUTPUT_DIR = output_dir(...)'
+    als Modulkonstante an, und output_dir() laeuft ueber find_project_root(),
+    das vom Arbeitsverzeichnis aus aufwaerts 'exists()' auf drei Marker prueft.
+
+    Das ist ein LESENDER Dateisystemzugriff und ausdruecklich zugelassen - die
+    Alternative waere gewesen, den Pfad erst in main() aufzuloesen, und dann
+    liesse er sich nicht mehr durch einen einzigen setattr ersetzen (siehe die
+    Begruendung in Schritt 0b des Plans). Was NICHT passieren darf, ist ein
+    schreibender Zugriff: kein mkdir, keine Protokolldatei, kein Backup. Genau
+    diese Grenze haelt dieser Pruefsatz fest.
+    """
+    monkeypatch.chdir(tmp_path)
+    for modul in list(sys.modules):
+        if modul == f"wt3000_scpi.{name}":
+            del sys.modules[modul]
+
+    vorher = set(tmp_path.rglob("*"))
+    importlib.import_module(f"wt3000_scpi.{name}")
+    neu = set(tmp_path.rglob("*")) - vorher
+
+    assert not neu, f"{name} hat beim Import angelegt: {sorted(p.name for p in neu)}"
 
 
 # ---------------------------------------------------------------------------

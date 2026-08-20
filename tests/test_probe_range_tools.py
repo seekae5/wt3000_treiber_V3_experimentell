@@ -23,19 +23,17 @@
 # probe_current_range.py geschrieben hat (siehe dessen Dateikopf). Der Ladeweg
 # unten erzeugt keinen solchen Pfad.
 #
-# Die Vorrichtung gehoert nach conftest.py (Schritt 0c des Plans, Befund
-# A-13); bis dahin steht sie hier lokal.
+# UEBERARBEITET (Schritt 0c): Vorrichtung und Ladefunktion liegen jetzt in
+# conftest.py. Die Begruendung fuer den Ladeweg steht dort, bei geraeteskript().
 # =============================================================================
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
 import pytest
 
+from conftest import geraeteskript
+
 from wt3000_scpi.wt3000_common import format_nrf
-from wt3000_scpi.wt3000_transport import FakeTransport
 
 ELEMENT = 4
 REMOTE_ON = ":COMMunicate:REMote ON"
@@ -44,21 +42,6 @@ REMOTE_OFF = ":COMMunicate:REMote OFF"
 #: Ausgangswerte des vorliegenden Aufbaus - Element 4 haengt direkt (5 A bzw.
 #: 1000 V), nicht am Sensoreingang. Siehe conftest.range_responses().
 AUSGANGSWERT = {"current": "5.00E+00", "voltage": "1.000E+03"}
-
-
-def geraeteskript(name: str):
-    """Ein Skript aus tools/hardware/ als Modul laden - ohne Paket, ohne Pfad.
-
-    Jeder Aufruf liefert ein FRISCHES Modulobjekt: die Tests setzen darin
-    Modulkonstanten um, und ein zwischen Tests geteiltes Objekt wuerde diese
-    Umstellungen weitertragen.
-    """
-    pfad = Path(__file__).resolve().parents[1] / "tools" / "hardware" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(f"geraeteskript_{name}", pfad)
-    assert spec is not None and spec.loader is not None, pfad
-    modul = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modul)
-    return modul
 
 
 def antworten(knoten: str, *bereichswerte: str) -> dict:
@@ -72,27 +55,12 @@ def antworten(knoten: str, *bereichswerte: str) -> dict:
     return {f"{knoten}:RANGE:ELEMENT{ELEMENT}": list(bereichswerte)}
 
 
-@pytest.fixture
-def werkzeuglauf(monkeypatch, tmp_path):
-    """main() eines Geraeteskripts gegen FakeTransport fahren."""
-
-    def _vorbereiten(modul, responses: dict) -> FakeTransport:
-        monkeypatch.setenv("WT3000_IP", "10.0.0.5")
-        transport = FakeTransport(responses)
-        monkeypatch.setattr(modul, "TmctlTransport", lambda _config: transport)
-        monkeypatch.setattr(modul, "setup_logging", lambda _pfad: None)
-        monkeypatch.setattr(modul, "OUTPUT_DIR", tmp_path)
-        return transport
-
-    return _vorbereiten
-
-
-def set_kommandos(transport: FakeTransport) -> list[str]:
+def set_kommandos(transport) -> list[str]:
     """Alles, was kein Query war - also jeder echte Schreibzugriff."""
     return [c for c in transport.written if not c.strip().endswith("?")]
 
 
-def bereichs_kommandos(transport: FakeTransport) -> list[str]:
+def bereichs_kommandos(transport) -> list[str]:
     """Nur die RANGe-Schreibzugriffe, ohne REMOTE."""
     return [c for c in set_kommandos(transport) if ":RANGe" in c]
 
@@ -110,7 +78,7 @@ WERKZEUGE = [
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
 def test_ausgangswert_wird_auch_bei_abbruch_zurueckgestellt(
-    werkzeuglauf, monkeypatch, name, knoten, groesse
+    stufenlauf, monkeypatch, name, knoten, groesse
 ):
     """Der Befund in seiner reinen Form.
 
@@ -119,7 +87,7 @@ def test_ausgangswert_wird_auch_bei_abbruch_zurueckgestellt(
     nicht abdeckte. Danach muss der Ausgangswert trotzdem am Geraet stehen.
     """
     modul = geraeteskript(name)
-    transport = werkzeuglauf(modul, antworten(knoten, AUSGANGSWERT[groesse]))
+    transport = stufenlauf(modul, antworten(knoten, AUSGANGSWERT[groesse]))
 
     # Der zweite get_range() findet keinen Eintrag mehr in der Antwortliste -
     # FakeTransport wirft dort. Kein kuenstlicher Fehler, sondern derselbe
@@ -148,7 +116,7 @@ def test_ausgangswert_wird_auch_bei_abbruch_zurueckgestellt(
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
 def test_ausgangswert_wird_auch_bei_strg_c_zurueckgestellt(
-    werkzeuglauf, monkeypatch, name, knoten, groesse
+    stufenlauf, monkeypatch, name, knoten, groesse
 ):
     """Strg+C zwischen Schreiben und Rueckstellen - der reale Fall.
 
@@ -157,7 +125,7 @@ def test_ausgangswert_wird_auch_bei_strg_c_zurueckgestellt(
     traegt die Zusage aus dem Dateikopf.
     """
     modul = geraeteskript(name)
-    transport = werkzeuglauf(
+    transport = stufenlauf(
         modul, antworten(knoten, AUSGANGSWERT[groesse], AUSGANGSWERT[groesse])
     )
 
@@ -180,10 +148,10 @@ def test_ausgangswert_wird_auch_bei_strg_c_zurueckgestellt(
 
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
-def test_glatter_lauf_stellt_den_ausgangswert_zurueck(werkzeuglauf, name, knoten, groesse):
+def test_glatter_lauf_stellt_den_ausgangswert_zurueck(stufenlauf, name, knoten, groesse):
     """Auch ohne Zwischenfall endet der Lauf auf dem Ausgangswert."""
     modul = geraeteskript(name)
-    transport = werkzeuglauf(
+    transport = stufenlauf(
         modul,
         antworten(knoten, AUSGANGSWERT[groesse], format_nrf(modul.TEST_VALUE)),
     )
@@ -202,7 +170,7 @@ def test_glatter_lauf_stellt_den_ausgangswert_zurueck(werkzeuglauf, name, knoten
 
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
-def test_nicht_uebernommener_wert_ergibt_rueckgabewert_1(werkzeuglauf, name, knoten, groesse):
+def test_nicht_uebernommener_wert_ergibt_rueckgabewert_1(stufenlauf, name, knoten, groesse):
     """Der Pruefsatz, der heute nicht formulierbar waere.
 
     Das Geraet meldet einen ANDEREN Wert zurueck als den gesendeten - die
@@ -212,16 +180,16 @@ def test_nicht_uebernommener_wert_ergibt_rueckgabewert_1(werkzeuglauf, name, kno
     """
     modul = geraeteskript(name)
     abweichend = "9.99E+00"
-    werkzeuglauf(modul, antworten(knoten, AUSGANGSWERT[groesse], abweichend))
+    stufenlauf(modul, antworten(knoten, AUSGANGSWERT[groesse], abweichend))
 
     assert modul.main() == 1
 
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
-def test_uebernommener_wert_ergibt_rueckgabewert_0(werkzeuglauf, name, knoten, groesse):
+def test_uebernommener_wert_ergibt_rueckgabewert_0(stufenlauf, name, knoten, groesse):
     """Gegenprobe: stimmt der Rueckgabewert, ist der Lauf erfolgreich."""
     modul = geraeteskript(name)
-    werkzeuglauf(
+    stufenlauf(
         modul,
         antworten(knoten, AUSGANGSWERT[groesse], format_nrf(modul.TEST_VALUE)),
     )
@@ -235,10 +203,10 @@ def test_uebernommener_wert_ergibt_rueckgabewert_0(werkzeuglauf, name, knoten, g
 
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
-def test_remote_wird_ein_und_wieder_ausgeschaltet(werkzeuglauf, name, knoten, groesse):
+def test_remote_wird_ein_und_wieder_ausgeschaltet(stufenlauf, name, knoten, groesse):
     """Beide Skripte schalten die Fernsteuerung ein und geben sie zurueck."""
     modul = geraeteskript(name)
-    transport = werkzeuglauf(
+    transport = stufenlauf(
         modul,
         antworten(knoten, AUSGANGSWERT[groesse], format_nrf(modul.TEST_VALUE)),
     )
@@ -251,11 +219,11 @@ def test_remote_wird_ein_und_wieder_ausgeschaltet(werkzeuglauf, name, knoten, gr
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
 def test_remote_wird_auch_bei_abbruch_zurueckgenommen(
-    werkzeuglauf, monkeypatch, name, knoten, groesse
+    stufenlauf, monkeypatch, name, knoten, groesse
 ):
     """Dieselbe Zusage wie A-01 in Stufe 3 und 4, hier fuer die Werkzeuge."""
     modul = geraeteskript(name)
-    transport = werkzeuglauf(modul, antworten(knoten, AUSGANGSWERT[groesse]))
+    transport = stufenlauf(modul, antworten(knoten, AUSGANGSWERT[groesse]))
     monkeypatch.setattr(
         modul.RangeAccess,
         "set_range",
@@ -269,8 +237,8 @@ def test_remote_wird_auch_bei_abbruch_zurueckgenommen(
 
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
-def test_use_remote_haengt_nicht_an_der_umgebung(
-    werkzeuglauf, monkeypatch, name, knoten, groesse
+def test_use_remote_haengt_nicht_an_der_konfiguration(
+    stufenlauf, name, knoten, groesse
 ):
     """Der Versuchsparameter steht im Skript, nicht in 'wt3000.json'.
 
@@ -281,10 +249,12 @@ def test_use_remote_haengt_nicht_an_der_umgebung(
     keiner der beiden Ursachen mehr zuzuordnen.
     """
     modul = geraeteskript(name)
-    monkeypatch.setenv("WT3000_USE_REMOTE", "0")
-    transport = werkzeuglauf(
+    # Die Konfiguration sagt ausdruecklich NEIN - das Skript muss REMOTE
+    # trotzdem einschalten, weil USE_REMOTE eine Modulkonstante ist.
+    transport = stufenlauf(
         modul,
         antworten(knoten, AUSGANGSWERT[groesse], format_nrf(modul.TEST_VALUE)),
+        use_remote=False,
     )
 
     modul.main()
@@ -301,7 +271,7 @@ def test_use_remote_haengt_nicht_an_der_umgebung(
 
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
-def test_fehlerqueue_wird_nach_der_rueckstellung_geprueft(werkzeuglauf, name, knoten, groesse):
+def test_fehlerqueue_wird_nach_der_rueckstellung_geprueft(stufenlauf, name, knoten, groesse):
     """':STATus:ERRor?' muss NACH dem letzten Schreibzugriff kommen.
 
     Sonst deckt die Pruefung die Rueckstellung nicht mit ab - und die
@@ -309,7 +279,7 @@ def test_fehlerqueue_wird_nach_der_rueckstellung_geprueft(werkzeuglauf, name, kn
     tut.
     """
     modul = geraeteskript(name)
-    transport = werkzeuglauf(
+    transport = stufenlauf(
         modul,
         antworten(knoten, AUSGANGSWERT[groesse], format_nrf(modul.TEST_VALUE)),
     )
@@ -324,10 +294,10 @@ def test_fehlerqueue_wird_nach_der_rueckstellung_geprueft(werkzeuglauf, name, kn
 
 
 @pytest.mark.parametrize("name, knoten, groesse", WERKZEUGE)
-def test_geraetefehler_ergibt_rueckgabewert_1(werkzeuglauf, name, knoten, groesse):
+def test_geraetefehler_ergibt_rueckgabewert_1(stufenlauf, name, knoten, groesse):
     """Ein Eintrag in der Fehlerqueue faellt als WTError auf und wird gefangen."""
     modul = geraeteskript(name)
-    transport = werkzeuglauf(
+    transport = stufenlauf(
         modul,
         antworten(knoten, AUSGANGSWERT[groesse], format_nrf(modul.TEST_VALUE)),
     )

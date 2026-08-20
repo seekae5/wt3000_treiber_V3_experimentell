@@ -17,10 +17,11 @@
 # bewusst so formuliert, dass er NICHT prueft, wie der Lauf ausgegangen ist -
 # nur, dass REMOTE zurueckgenommen wurde. Genau das ist die Zusage.
 #
-# Die Vorrichtung unten ist die aus test_stage5b_write_probe.py. Sie gehoert
-# nach conftest.py (Schritt 0c des Plans, Befund A-13); bis dahin steht sie
-# hier lokal, mit der einen Erweiterung, die Stufe 3 braucht - siehe
-# _ausgabeziel_umlenken().
+# Die Vorrichtung 'stufenlauf' liegt in conftest.py und wird von pytest ueber
+# den Parameternamen zugestellt - sie wird deshalb nicht importiert. Bis
+# Schritt 0c stand sie hier lokal, mit einer Fallunterscheidung, die Stufe 3
+# brauchte: sie fuehrte 'output_dir()' als Aufruf statt als Modulkonstante.
+# Schritt 0b hat das vereinheitlicht, die Unterscheidung ist damit entfallen.
 #
 # WAS VOR DER REPARATUR ROT WAR - gemessen, nicht angenommen: von den zehn
 # Pruefsaetzen dieser Datei schlugen genau ZWEI fehl, naemlich
@@ -46,7 +47,6 @@ from wt3000_scpi import stage4_measure as stage4
 from wt3000_scpi.wt3000_core import WTError
 from wt3000_scpi.wt3000_itemspec import build_item_table
 from wt3000_scpi.wt3000_measure import build_standard_profile
-from wt3000_scpi.wt3000_transport import FakeTransport
 
 REMOTE_ON = ":COMMunicate:REMote ON"
 REMOTE_OFF = ":COMMunicate:REMote OFF"
@@ -96,52 +96,8 @@ def stage4_antworten() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Vorrichtung
+# Hilfsmittel
 # ---------------------------------------------------------------------------
-
-
-def _ausgabeziel_umlenken(monkeypatch, modul, tmp_path) -> None:
-    """Protokoll und Backup ins tmp-Verzeichnis lenken.
-
-    Hier schlaegt Befund A-10 durch: Stufe 4 hat eine Modulkonstante
-    OUTPUT_DIR, Stufe 3 ruft output_dir() innerhalb von main() auf. Es sind
-    also zwei verschiedene Namen zu ersetzen. Ohne diese Umlenkung schriebe
-    Stufe 3 ihr Backup-JSON in die Projektwurzel - der Testlauf hinterliesse
-    Dateien im Arbeitsbaum.
-
-    Schritt 0b des Plans vereinheitlicht das auf die Konstante; diese Funktion
-    faellt dann auf die eine Zeile zusammen, die test_stage5b_write_probe.py
-    schon hat.
-    """
-    if hasattr(modul, "OUTPUT_DIR"):
-        monkeypatch.setattr(modul, "OUTPUT_DIR", tmp_path)
-    else:
-        monkeypatch.setattr(modul, "output_dir", lambda *_a, **_k: tmp_path)
-
-
-@pytest.fixture
-def stufenlauf(monkeypatch, tmp_path):
-    """main() eines Stufenskripts gegen FakeTransport fahren."""
-
-    def _vorbereiten(modul, responses: dict[str, str]) -> FakeTransport:
-        # use_remote ausdruecklich ueber die Umgebung setzen, nicht der
-        # 'wt3000.json' der Projektwurzel ueberlassen: stuende dort einmal
-        # 'use_remote: false', ginge gar kein REMOTE hinaus und dieser Test
-        # waere still bedeutungslos, statt rot zu werden. Die Umgebung hat in
-        # der Aufloesungskette Vorrang vor der Datei.
-        monkeypatch.setenv("WT3000_IP", "10.0.0.5")
-        monkeypatch.setenv("WT3000_USE_REMOTE", "1")
-
-        transport = FakeTransport(responses)
-        monkeypatch.setattr(modul, "TmctlTransport", lambda _config: transport)
-        # setup_logging() setzt die Handler des Root-Loggers neu und raeumte
-        # damit mitten im Lauf pytests Log-Mitschnitt ab - dieselbe Begruendung
-        # wie in test_stage5b_write_probe.py.
-        monkeypatch.setattr(modul, "setup_logging", lambda _pfad: None)
-        _ausgabeziel_umlenken(monkeypatch, modul, tmp_path)
-        return transport
-
-    return _vorbereiten
 
 
 def _wirft(exception: BaseException):

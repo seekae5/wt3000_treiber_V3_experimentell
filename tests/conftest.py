@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -46,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 # set_timeout/close, nicht am Konstruktor. Ebenso das monkeypatch auf
 # wt3000_device.TmctlTransport in test_device_facade.py: dort wird der Name
 # ersetzt, der echte Konstruktor also gar nicht erreicht.
-from wt3000_scpi.wt3000_transport import TmctlTransport  # noqa: E402
+from wt3000_scpi.wt3000_transport import FakeTransport, TmctlTransport  # noqa: E402
 
 
 def _kein_geraetezugriff(self, *args, **kwargs):
@@ -185,3 +186,90 @@ def input_snapshot(*elements, **overrides):
     )
     base.update(overrides)
     return InputSnapshot(**base)
+
+
+# ---------------------------------------------------------------------------
+# Stufen- und Geraeteskripte vollstaendig durchspielen
+# NEU (Schritt 0c aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-13)
+# ---------------------------------------------------------------------------
+#
+# Die Vorrichtung stammt aus test_stage5b_write_probe.py. Sie hat dort gezeigt,
+# dass ein main() vollstaendig gegen FakeTransport laufen kann - und war damit
+# lange der einzige Weg, ein Stufenskript ueberhaupt zu pruefen: von den fuenf
+# Stufen war genau eine abgedeckt, und die vier ungeprueften waren die, die
+# schreiben.
+#
+# Sie steht ab hier hier, weil sie inzwischen von drei Testmodulen gebraucht
+# wird. Voraussetzung dafuer war Schritt 0b: Stufe 2 und 3 fuehrten
+# 'output_dir()' als Aufruf INNERHALB von main() statt als Modulkonstante, und
+# damit trug das Rezept fuer sie nicht - es waere ein anderer Name zu ersetzen
+# gewesen.
+
+
+def geraeteskript(name: str):
+    """Ein Skript aus tools/hardware/ als Modul laden.
+
+    Die beiden Geraeteskripte sind keine Paketmodule; ohne diesen Umweg sind
+    sie aus der Suite heraus nicht erreichbar ('testpaths = ["tests"]', kein
+    tools/__init__.py).
+
+    Geladen wird ueber den DATEIPFAD und ausdruecklich NICHT ueber einen
+    sys.path-Eintrag. Ein solcher Eintrag waere genau der Weg, ueber den eine
+    automatische Import-Ergaenzung der Entwicklungsumgebung einmal
+    'from tests.conftest import ...' in probe_current_range.py geschrieben hat -
+    was die Sperre oben ausloeste und das Skript am Geraet unbrauchbar machte
+    (siehe dessen Dateikopf). Hier entsteht kein Importweg, der das kann.
+
+    Jeder Aufruf liefert ein FRISCHES Modulobjekt: die Tests setzen darin
+    Modulkonstanten um, und ein geteiltes Objekt truege sie weiter.
+    """
+    pfad = Path(__file__).resolve().parents[1] / "tools" / "hardware" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"geraeteskript_{name}", pfad)
+    assert spec is not None and spec.loader is not None, pfad
+    modul = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modul)
+    return modul
+
+
+@pytest.fixture
+def stufenlauf(monkeypatch, tmp_path):
+    """main() eines Stufen- oder Geraeteskripts gegen FakeTransport fahren.
+
+    Drei Ersetzungen im Modulnamensraum - mehr braucht es nicht:
+
+      TmctlTransport   der einzige Weg zu einer echten Verbindung. Ersetzt wird
+                       der Name IM MODUL, nicht global: der Konstruktor ist
+                       oben stillgelegt, und daran soll sich auch diese
+                       Vorrichtung nicht vorbeimogeln.
+      OUTPUT_DIR       sonst landen Protokoll, Backup und Messdaten im
+                       Arbeitsbaum - jeder Testlauf hinterliesse Dateien.
+      setup_logging    setzt die Handler des Root-Loggers neu und raeumte damit
+                       mitten im Testlauf pytests Log-Mitschnitt ab; alles nach
+                       dem Aufruf fehlte dann in 'caplog.records'. Nachgestellt
+                       und bestaetigt. Geprueft wird hier der Ablauf, nicht die
+                       Protokolleinrichtung.
+
+    'use_remote' geht ausdruecklich ueber die Umgebung und nicht ueber die
+    'wt3000.json' der Projektwurzel: stuende dort einmal 'use_remote: false',
+    liefe ein Test, der die Ruecknahme der Fernsteuerung prueft, still ins
+    Leere, statt rot zu werden. Die Umgebung hat in der Aufloesungskette
+    Vorrang vor der Datei.
+    """
+
+    def _vorbereiten(
+        modul,
+        responses: dict,
+        *,
+        ip: str = "10.0.0.5",
+        use_remote: bool = True,
+    ) -> FakeTransport:
+        monkeypatch.setenv("WT3000_IP", ip)
+        monkeypatch.setenv("WT3000_USE_REMOTE", "1" if use_remote else "0")
+
+        transport = FakeTransport(responses)
+        monkeypatch.setattr(modul, "TmctlTransport", lambda _config: transport)
+        monkeypatch.setattr(modul, "OUTPUT_DIR", tmp_path)
+        monkeypatch.setattr(modul, "setup_logging", lambda _pfad: None)
+        return transport
+
+    return _vorbereiten

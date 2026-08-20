@@ -122,7 +122,45 @@ Jeder Schritt ist einzeln committierbar und lässt die Suite grün zurück.
 
 ## 3 — Die Schritte
 
-### Schritt 0 — Das Netz aufspannen `XS` · Befunde A-11, A-10, A-13 (Teil)
+### Schritt 0 — Das Netz aufspannen `XS` · Befunde A-11, A-10, A-13 (Teil) — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** Nachgeholt nach Schritt 1 und 2, deshalb konnten beide
+> Testmodule sofort auf die gehobene Vorrichtung umgestellt werden. 348 Tests grün
+> (vorher 337), `ruff` und `mypy` sauber.
+>
+> **Über den Plan hinaus — zwei Prüfsätze, die den Befund erst wirklich schließen:**
+>
+> * `test_layers_deckt_jedes_modul_ab`. Der Befund A-11 war nicht, dass fünf Einträge
+>   fehlten, sondern dass es niemandem auffiel: `test_importrichtung_zeigt_nach_unten` ist
+>   über `sorted(LAYERS)` parametrisiert und prüft genau so viele Module, wie jemand
+>   eingetragen hat. Ein neues Modul ohne Eintrag ließe die Suite weiterhin grün. Der neue
+>   Prüfsatz hält `LAYERS` gegen den tatsächlichen Bestand und schließt damit den Kreis.
+> * `test_import_legt_keine_datei_an`. 0b dehnt den Nebeneffekt „der Import tut etwas" auf
+>   alle sieben Skripte aus. Der Plan sah dafür nur einen Kommentar vor; das ist zu wenig,
+>   weil die Grenze zwischen *lesendem* Zugriff (zugelassen) und *schreibendem* (nicht)
+>   nirgends geprüft war. Jetzt schon.
+>
+> **Was beim Umstellen auffiel — stille Testverwitterung.** `stufenlauf` setzt
+> `WT3000_USE_REMOTE` selbst, damit ein Test nicht von der `wt3000.json` der Projektwurzel
+> abhängt. Der Prüfsatz aus Schritt 2, der die REMOTE-Unabhängigkeit belegt, setzte die
+> Variable jedoch *vor* dem Fixture-Aufruf — die Fixture überschrieb sie danach, und der
+> Test bewies nichts mehr, ohne rot zu werden. Er läuft jetzt über den Fixture-Parameter
+> `use_remote=False` und ist damit sogar strenger als vorher: die Konfiguration sagt
+> ausdrücklich Nein, das Skript muss trotzdem `REMote ON` senden. Gegengeprüft durch eine
+> Mutation (`USE_REMOTE` → `config.use_remote`) — der Prüfsatz wird dann rot.
+>
+> **Abweichungen von der Vorgabe unten:**
+>
+> * `Path` fehlte in Stufe 2 und 3 im Import — die Umstellung auf eine typisierte
+>   Modulkonstante brauchte ihn.
+> * Der Parameter `logging_stilllegen`, den der Plan für Schritt 3 vorsieht, ist **nicht**
+>   eingebaut. Es gibt noch keinen Test dafür; er kommt mit Schritt 3, der ihn braucht.
+> * Der zweite Teil von A-10 ist nur zur Hälfte umgesetzt: der Protokollkopf nennt jetzt
+>   das Ausgabeverzeichnis. Die *Herkunft der Konfiguration* gehört dazu, kann aber erst in
+>   Schritt 3 protokolliert werden — vorher steht die Auflösung noch vor `setup_logging()`.
+> * Die Fixture wird **nicht** importiert; pytest stellt sie über den Parameternamen zu.
+>   Ein `from conftest import stufenlauf` erzeugt eine F811-Warnung und ist überflüssig.
+>   Nur `geraeteskript()` ist eine gewöhnliche Funktion und wird importiert.
 
 Drei Teile, ein Commit. Nach diesem Schritt ist jede weitere Änderung an einem
 Stufenskript oder Geräteskript maschinell überprüfbar.

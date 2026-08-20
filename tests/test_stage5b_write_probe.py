@@ -37,20 +37,16 @@ def geraeteantworten() -> dict:
 
 
 @pytest.fixture
-def lauf(monkeypatch, tmp_path):
+def lauf(stufenlauf):
     """main() auf einem FakeTransport, Ausgabedateien im tmp-Verzeichnis.
 
-    setup_logging() wird stillgelegt, und zwar aus genau dem Grund, den sein
-    eigener Docstring nennt: es leert die Handler des Root-Loggers. Bliebe es
-    aktiv, raeumte es mitten im Testlauf pytests Log-Mitschnitt ab - alles nach
-    dem Aufruf fehlte dann in 'caplog.records'. Nachgestellt und bestaetigt.
-    Geprueft wird hier die Schreibsperre, nicht die Protokolleinrichtung.
+    UEBERARBEITET (Schritt 0c aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-13):
+    die drei monkeypatch-Zeilen, die hier standen, liegen jetzt als Fixture
+    'stufenlauf' in conftest.py - samt der Begruendung, warum setup_logging()
+    stillgelegt werden muss. Sie werden inzwischen von drei Testmodulen
+    gebraucht; diese Datei war die Vorlage dafuer.
     """
-    transport = FakeTransport(geraeteantworten())
-    monkeypatch.setattr(stage5b, "TmctlTransport", lambda _config: transport)
-    monkeypatch.setattr(stage5b, "OUTPUT_DIR", tmp_path)
-    monkeypatch.setattr(stage5b, "setup_logging", lambda _pfad: None)
-    return transport
+    return stufenlauf(stage5b, geraeteantworten())
 
 
 def gesendete_kommandos(transport: FakeTransport) -> list[str]:

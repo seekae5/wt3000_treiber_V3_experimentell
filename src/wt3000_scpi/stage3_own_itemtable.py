@@ -13,6 +13,7 @@ import logging
 import time
 from collections import Counter
 from datetime import datetime
+from pathlib import Path
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage3_own_itemtable' - ein direkter
@@ -58,6 +59,29 @@ POLL_INTERVAL_S: float = 1.0  # entspricht :RATE? = 1.00E+00
 # Auf True setzen, um beim Restore alle Items zu schreiben statt nur die
 # abweichenden. Normalerweise nicht noetig.
 FORCE_FULL_RESTORE: bool = False
+
+# Zielverzeichnis fuer Protokoll und Sicherung.
+#
+# UEBERARBEITET (Schritt 0b aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-10):
+# stand bis hierher als 'ziel = output_dir()' INNERHALB von main(). Fuenf der
+# sieben ausfuehrbaren Skripte fuehrten die Modulkonstante, zwei den Aufruf -
+# derselbe Zweck in zwei Fassungen. Vereinheitlicht wurde auf die Konstante,
+# und zwar nicht wegen der Mehrheit, sondern weil sie ERSETZBAR ist: ein
+# 'monkeypatch.setattr(modul, "OUTPUT_DIR", tmp_path)' trifft genau einen
+# Namen, waehrend ein Ersetzen von 'output_dir' die Funktion fuer jeden
+# weiteren Aufruf im selben Modul mitveraendern wuerde. Genau daran haengt es,
+# dass main() im Test vollstaendig durchspielbar ist (Befund A-13).
+#
+# ZU BEACHTEN - der Import tut damit etwas: output_dir() laeuft ueber
+# find_project_root(), das vom Arbeitsverzeichnis aus aufwaerts 'exists()' auf
+# drei Marker prueft. Das ist ein LESENDER Dateisystemzugriff beim blossen
+# Import. Er ist zugelassen und in tests/test_package_layout.py als Grenze
+# festgehalten: 'test_import_legt_keine_datei_an' verlangt, dass beim Import
+# nichts ENTSTEHT - kein mkdir, keine Protokolldatei, kein Backup.
+#
+# Aufgeloest wird die Fuge in Schritt 8: sobald main() ein 'output_dir'
+# entgegennimmt, ist diese Konstante nur noch der Vorgabewert.
+OUTPUT_DIR: Path = output_dir()
 
 
 # UEBERARBEITET (F-08, siehe AENDERUNGEN_2026-08-18.md): setup_logging() lag in
@@ -118,16 +142,14 @@ def main() -> int:
     # UEBERARBEITET (P-7): Verbindungsparameter aus der Auflaesungskette -
     # WT3000_*-Umgebungsvariablen oder 'wt3000.json'. Siehe README.
     config = WTConfig.from_environment()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # UEBERARBEITET: Projektwurzel statt Arbeitsverzeichnis - siehe
-    # wt3000_common.output_dir(). Die flache Ablage bleibt absichtlich,
-    # sie ist nur nicht mehr vom Startverzeichnis abhaengig.
-    ziel = output_dir()
-    log_file = ziel / f"wt3000_stage3_{timestamp}.txt"
-    backup_file = ziel / f"wt3000_itemtable_backup_{timestamp}.json"
+    log_file = OUTPUT_DIR / f"wt3000_stage3_{timestamp}.txt"
+    backup_file = OUTPUT_DIR / f"wt3000_itemtable_backup_{timestamp}.json"
     setup_logging(log_file)
     log = logging.getLogger("wt3000.stage3")
     log.info("Protokolldatei: %s", log_file)
+    log.info("Ausgabeverzeichnis: %s", OUTPUT_DIR)
     log.info("Stufe 3 - eigene Item-Tabelle (%d Items)", len(TARGET_ITEMS))
 
     backup: ItemTable | None = None
