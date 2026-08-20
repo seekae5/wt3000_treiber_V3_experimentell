@@ -1,9 +1,9 @@
 {
-  "_hinweis": "Kopie dieser Datei als 'wt3000.json' anlegen und anpassen. Sie wird von WTConfig.from_environment() gelesen und ist per .gitignore ausgeschlossen. Umgebungsvariablen (WT3000_IP usw.) haben Vorrang.",
+  "_hinweis": "Kopie dieser Datei als 'wt3000.json' anlegen und anpassen. Sie wird von WTConfig.from_environment() gelesen. Umgebungsvariablen (WT3000_IP usw.) haben Vorrang.",
   "ip": "192.168.10.20",
   "user": "TEST",
   "password": "1",
-  "dll_path": "tmctl64.dll",
+  "dll_path": "C:\\Users\\Persystems\\PycharmProjects\\wt3000_treiber_V3_experimentell\\tools\\tmctl64.dll",
   "timeout_ms": 5000,
   "use_remote": true
 }

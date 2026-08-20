@@ -243,7 +243,14 @@ def resolve_dll_path(dll_path: str) -> "str | Path":
 
       Pfadangabe (enthaelt einen Trenner)  muss existieren. Sonst laedt ctypes
                                            irgendetwas oder nichts, und die
-                                           Meldung waere unbrauchbar.
+                                           Meldung waere unbrauchbar. Wird
+                                           relativ angegeben (z.B. zum
+                                           Projektverzeichnis), hier auf einen
+                                           absoluten Pfad aufgeloest - sonst
+                                           bricht os.add_dll_directory() beim
+                                           Aufrufer mit WinError 87 ab, das
+                                           verlangt zwingend einen absoluten
+                                           Verzeichnispfad.
       blosser Dateiname                    wird durchgereicht. Windows sucht
                                            dann selbst in PATH und im
                                            Anwendungsverzeichnis - der uebliche
@@ -259,7 +266,7 @@ def resolve_dll_path(dll_path: str) -> "str | Path":
             "Parameter. Ein blosser Dateiname ('tmctl64.dll') laesst Windows "
             "selbst suchen."
         )
-    return kandidat
+    return kandidat.resolve()
 
 
 # ---------------------------------------------------------------------------
