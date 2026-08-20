@@ -63,7 +63,7 @@ ELEMENT: int = 4
 # in M0-1 geht: die PARAMETERSYNTAX. Ein Zwischenwert wie 0.4 wuerde zwei
 # Fragen auf einmal stellen - Syntax (M0-1) und Rundungsverhalten (M0-2) - und
 # ein abweichender Rueckgabewert liesse sich dann keiner von beiden zuordnen.
-TEST_VALUE: float = 0.5
+TEST_VALUE: float = 0.75
 
 # UEBERARBEITET: Ablage an der Projektwurzel statt an 'Path.cwd()'.
 # Bis hierher hing das am Arbeitsverzeichnis - ein Start aus einem
