@@ -1055,8 +1055,8 @@ Gesammelt am Ende, weil mehrere frühere Schritte Zahlen und Aussagen verändern
 | [README.md:70](../README.md#L70), [:272](../README.md#L272) | „241 Tests" → aktueller Stand. Heute 306; nach diesem Plan deutlich mehr. **Erwägen, die Zahl ganz zu streichen** — sie ist bei jedem Schritt falsch und trägt nichts, was `pytest` nicht selbst sagt. |
 | [wt3000_numeric.py:3](../src/wt3000_scpi/wt3000_numeric.py#L3) | Dateikopf sagt „Layer 3", `__init__.py` und `LAYERS` sagen Layer 2. |
 | [wt3000_measure.py:140](../src/wt3000_scpi/wt3000_measure.py#L140) | „Layer 4 — der Datensatz", tatsächlich Layer 3. |
-| `MarkDowns/OFFENE_PUNKTE.md` | S-01, S-03, S-05, S-06 als (teil-)erledigt kennzeichnen, mit Verweis auf die Schritte dieses Plans. |
-| `MarkDowns/ROADMAP.md` | M1-5 hat nach Schritt 5 und 6 drei von fünf Spiegelstrichen; M5-4 nach Schritt 7 einen Teil. Status nachziehen. |
+| `docs/OFFENE_PUNKTE.md` | S-01, S-03, S-05, S-06 als (teil-)erledigt kennzeichnen, mit Verweis auf die Schritte dieses Plans. |
+| `docs/ROADMAP.md` | M1-5 hat nach Schritt 5 und 6 drei von fünf Spiegelstrichen; M5-4 nach Schritt 7 einen Teil. Status nachziehen. |
 
 Die beiden Layer-Angaben in den Dateiköpfen sind die einzigen Einträge dieser Tabelle,
 die einen Leser aktiv in die Irre führen — wer die Schichtung am Dateikopf nachvollzieht,

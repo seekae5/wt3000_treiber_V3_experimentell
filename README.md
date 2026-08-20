@@ -18,14 +18,14 @@ Python ≥ 3.10 · keine Laufzeitabhängigkeiten · Version 0.3.0 · **experimen
 | **Steuerbare Messung** — `start()`/`stop()`, Gerätesteuerung, Taktung am Gerät | fehlt |
 | **Austauschbarer Export** — andere Formate als CSV, Einheiten an den Daten | fehlt |
 
-Was noch fehlt und in welcher Reihenfolge es entsteht, steht in [ROADMAP.md](ROADMAP.md).
+Was noch fehlt und in welcher Reihenfolge es entsteht, steht in [ROADMAP.md](docs/ROADMAP.md).
 
 > **Zum Reifegrad.** Dieser Treiber steuert ein eingemessenes Messgerät. Er ist auf
 > Vorsicht ausgelegt, nicht auf Bequemlichkeit: schreibende Zugriffe sind doppelt
 > gesperrt, jede Änderung wird vorher gesichert, zurückgelesen und beim Verlassen
 > wiederhergestellt. Einige Annahmen über das Geräteverhalten sind noch nicht am Gerät
 > belegt — sie sind im Quelltext durchgängig mit `ZU VERIFIZIEREN` markiert und in
-> [ROADMAP.md](ROADMAP.md) unter **M0** gesammelt.
+> [ROADMAP.md](docs/ROADMAP.md) unter **M0** gesammelt.
 
 ---
 
@@ -284,10 +284,10 @@ Nur-Lesen-Sperre und die vollständige Wiederherstellung nach einem Abbruch.
 
 | Datei | Inhalt |
 |---|---|
-| [ROADMAP.md](ROADMAP.md) | Zielbild, Meilensteine M0–M5, Zielarchitektur, Abhängigkeiten |
-| [AENDERUNGEN_2026-08-18.md](AENDERUNGEN_2026-08-18.md) | Fehlerprüfung: Änderungen F-01…F-09, offene Befunde B-01…B-15 |
-| [AENDERUNGEN_2026-08-19_M1-1.md](AENDERUNGEN_2026-08-19_M1-1.md) | Fassade `WT3000`: Umsetzung, Erkenntnisse, was bewusst offen blieb |
-| [WT3000_Commands_Overview.md](WT3000_Commands_Overview.md) | Kurzübersicht der SCPI-Kommandogruppen des Geräts |
+| [ROADMAP.md](docs/ROADMAP.md) | Zielbild, Meilensteine M0–M5, Zielarchitektur, Abhängigkeiten |
+| [AENDERUNGEN_2026-08-18.md](docs/AENDERUNGEN_2026-08-18.md) | Fehlerprüfung: Änderungen F-01…F-09, offene Befunde B-01…B-15 |
+| [AENDERUNGEN_2026-08-19_M1-1.md](docs/AENDERUNGEN_2026-08-19_M1-1.md) | Fassade `WT3000`: Umsetzung, Erkenntnisse, was bewusst offen blieb |
+| [WT3000_Commands_Overview.md](docs/WT3000_Commands_Overview.md) | Kurzübersicht der SCPI-Kommandogruppen des Geräts |
 
 Referenz für alles Gerätebezogene ist das Handbuch **IM WT3001E-17EN**. Jede
 SCPI-Eigenheit im Quelltext nennt die Fundstelle oder ist als offene Frage markiert.
