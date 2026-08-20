@@ -327,6 +327,29 @@ def write_metadata(
             device[key] = session.query(command)
         except WTError as error:
             device[key] = f"<Fehler: {error}>"
+            # UEBERARBEITET (Schritt 6 aus MarkDowns/PLAN_AUFRUFKETTE.md,
+            # Befund A-07): Dies ist die EINZIGE Stelle im Bestand, an der ein
+            # fehlgeschlagener Query nicht zum Abbruch fuehrt, sondern die
+            # naechste Abfrage nach sich zieht. Damit ist sie auch die einzige,
+            # an der eine VERSPAETETE Antwort in die falsche Zeile geraten kann.
+            #
+            # Laeuft ':INPut?' - die laengste der elf Abfragen - in einen
+            # Timeout und trifft die Antwort ein, waehrend schon
+            # ':INPut:WIRing?' unterwegs ist, dann landet der ':INPut?'-Rumpf
+            # im Feld 'input_wiring'. Das Sidecar sieht danach plausibel aus
+            # und ist falsch - und es ist die Datei, aus der eine Messreihe
+            # spaeter interpretiert wird. Ein plausibel aussehendes, falsches
+            # Sidecar ist schlimmer als ein fehlendes.
+            #
+            # drain_after_failure() ist genau dafuer gebaut (Befund S-03: es
+            # war getestet und im gesamten Produktivcode ungenutzt). Es senkt
+            # das Timeout kurz, liest einmal, verwirft und stellt das Timeout
+            # im finally wieder her.
+            #
+            # Der Fehler bleibt im Feld stehen: das Aufraeumen darf ihn nicht
+            # verschlucken, sonst sieht das Sidecar vollstaendig aus, obwohl
+            # eine Angabe fehlt.
+            session.drain_after_failure()
 
     payload = {
         "recorded_at": datetime.now(timezone.utc).astimezone().isoformat(),

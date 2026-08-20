@@ -848,7 +848,50 @@ Das ist der bessere Prüfsatz als ein reines „wirft WTError" — er zeigt, das
 
 ---
 
-### Schritt 6 — `drain_after_failure()` in den einen Pfad, der ihn braucht `S` · Befund A-07
+### Schritt 6 — `drain_after_failure()` in den einen Pfad, der ihn braucht `S` · Befund A-07 — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** Eine Zeile Produktivcode, sieben Prüfsätze — vier davon
+> vorher rot. Nachweis:
+> [tests/test_metadata_drain.py](../tests/test_metadata_drain.py).
+> 454 Tests (453 grün, siehe Fußnote), `mypy` sauber, `ruff` sauber auf `src`, `tests` und
+> den beiden fertigen Geräteskripten.
+>
+> **Der Befund reproduziert ohne Kunstgriff.** `FakeTransport.prime()` gibt es genau
+> dafür — sein Docstring nennt den Fall wörtlich. Die Antwortfunktion für `:INPut?` legt
+> die verspätete Antwort ab und scheitert dann; alles Weitere ergibt sich aus der
+> Reihenfolge in `_pending`. Vor der Reparatur:
+>
+> ```
+> input_wiring traegt 'ELEMENT1,1000V,10A;ELEMENT2,1000V,10A;ELEMENT3,1000V,10A'
+>   – erwartet: 'V3A3,P1W2'
+> ```
+>
+> Also exakt die Verwechslung, die A-07 beschreibt: das Sidecar sieht plausibel aus und
+> ist falsch.
+>
+> **Vier Prüfsätze sichern ab, was sich *nicht* ändern durfte** — sie sind hier wichtiger
+> als üblich, weil eine falsch eingebaute Reparatur schlimmer wäre als der Fehler:
+>
+> * Das gescheiterte Feld bleibt als `<Fehler: …>` vermerkt. Das Aufräumen darf den
+>   Fehler nicht verschlucken, sonst sieht das Sidecar vollständig aus, obwohl eine
+>   Angabe fehlt.
+> * `write_metadata()` bricht weiterhin nicht ab. Die Metadaten sind eine Zugabe; ein
+>   fehlgeschlagener Query darf die Messung nicht verhindern — genau deshalb ist dies
+>   überhaupt die einzige Stelle mit einem weiterlaufenden `except`.
+> * **Das Timeout wird wiederhergestellt.** `drain_after_failure()` senkt es auf
+>   `drain_timeout_ms`; bliebe der Wert stehen, liefe jede folgende Abfrage der Messreihe
+>   mit 500 ms statt 5000 ms. Die Reparatur erzeugte dann einen schlimmeren Fehler als den,
+>   den sie behebt.
+> * Auf dem glatten Weg läuft **kein** Drain — kein zusätzlicher Lesevorgang je Abfrage.
+>
+> Damit ist der erste Spiegelstrich von **M1-5** erledigt („`drain_after_failure()` in
+> einen begründeten Produktivpfad integrieren") und **S-03** geschlossen: die Methode war
+> getestet und im gesamten Produktivcode ungenutzt.
+>
+> *Fußnote:* `test_output_location.py::test_die_geraeteskripte_unter_tools_ebenso` schlägt
+> fehl, weil es jede `*.py` unter `tools/hardware/` per `ast.parse` liest und dort eine
+> unversionierte, halbfertige `probe_setWiring.py` liegt (endet mitten in einem
+> `with`-Block). Nicht Teil dieses Schritts und nicht von ihm verursacht.
 
 **Ort:** [wt3000_measure.py:321–326](../src/wt3000_scpi/wt3000_measure.py#L321)
 
