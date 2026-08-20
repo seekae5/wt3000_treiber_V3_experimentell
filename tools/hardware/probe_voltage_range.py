@@ -29,7 +29,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from wt3000_scpi.wt3000_common import setup_logging
+from wt3000_scpi.wt3000_common import output_dir, setup_logging
 from wt3000_scpi.wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
 from wt3000_scpi.wt3000_rangeio import Quantity, RangeAccess
 
@@ -40,7 +40,12 @@ from wt3000_scpi.wt3000_rangeio import Quantity, RangeAccess
 ELEMENT: int = 4
 TEST_VALUE: float = 1000.0
 
-OUTPUT_DIR: Path = Path.cwd() / "konfiguration"
+# UEBERARBEITET: Ablage an der Projektwurzel statt an 'Path.cwd()'.
+# Bis hierher hing das am Arbeitsverzeichnis - ein Start aus einem
+# Unterverzeichnis (Entwicklungsumgebungen tun das standardmaessig) legte
+# ein zweites gleichnamiges Verzeichnis dort an. Siehe
+# wt3000_common.output_dir().
+OUTPUT_DIR: Path = output_dir("konfiguration")
 
 
 def main() -> int:

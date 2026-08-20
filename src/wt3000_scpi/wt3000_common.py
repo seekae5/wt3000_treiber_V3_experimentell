@@ -203,6 +203,51 @@ def values_match(requested: float, actual: float, tolerance: float = 1e-3) -> bo
 # tests/test_package_layout.py mitgezogen, ohne etwas zu gewinnen.
 
 
+# Dateien, an denen eine Projektwurzel erkennbar ist. 'pyproject.toml' zuerst,
+# weil sie das Projekt definiert; '.git' als Rueckfall fuer einen Klon ohne
+# Installation; 'wt3000.json' zuletzt, weil sie auch anderswo liegen darf.
+_PROJEKT_MARKER: Final[tuple[str, ...]] = ("pyproject.toml", ".git", "wt3000.json")
+
+
+def find_project_root(start: Path | None = None) -> Path | None:
+    """Projektwurzel suchen: vom Startverzeichnis aufwaerts bis zur Dateiwurzel.
+
+    NEU. Gegenstueck zu 'WTConfig.config_search_paths()' auf der Ausgabeseite,
+    und aus demselben Anlass entstanden: die Stufen- und Geraeteskripte legten
+    ihre Protokolle, Sicherungen und Messdateien unter 'Path.cwd()' ab - also
+    dort, wo der Prozess zufaellig gestartet wurde. Entwicklungsumgebungen
+    starten ein Skript ueblicherweise in SEINEM Verzeichnis, und so entstand
+    ein zweites 'konfiguration/' unter tools/hardware/, waehrend dasselbe
+    Skript aus der Projektwurzel heraus in das richtige schrieb. Gemerkt hat
+    das niemand, weil beide Verzeichnisse gleich heissen und beide von
+    '.gitignore' erfasst sind.
+
+    Rueckgabe 'None', wenn kein Marker gefunden wird. Das ist kein Fehler,
+    sondern der Normalfall fuer ein installiertes Paket ausserhalb des
+    Quellbaums - dort ist 'Path.cwd()' die richtige Antwort, und
+    'output_dir()' setzt genau das ein.
+    """
+    beginn = (start or Path.cwd()).resolve()
+    for verzeichnis in (beginn, *beginn.parents):
+        if any((verzeichnis / marker).exists() for marker in _PROJEKT_MARKER):
+            return verzeichnis
+    return None
+
+
+def output_dir(name: str | None = None, start: Path | None = None) -> Path:
+    """Ablageort fuer Protokolle, Sicherungen und Messdateien.
+
+    'output_dir("messungen")' liefert '<Projektwurzel>/messungen', wenn eine
+    Projektwurzel gefunden wird, sonst '<Arbeitsverzeichnis>/messungen'. Ohne
+    'name' kommt die Wurzel selbst heraus.
+
+    Das Verzeichnis wird NICHT angelegt - das bleibt beim Aufrufer, der auch
+    entscheidet, ob er es ueberhaupt braucht.
+    """
+    wurzel = find_project_root(start) or (start or Path.cwd())
+    return wurzel / name if name else wurzel
+
+
 def setup_logging(log_file: Path) -> None:
     """Logging auf Konsole und in eine Protokolldatei einrichten.
 

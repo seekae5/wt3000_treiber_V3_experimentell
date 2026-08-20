@@ -13,12 +13,11 @@ import logging
 import time
 from collections import Counter
 from datetime import datetime
-from pathlib import Path
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage2_read_numeric' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
-from .wt3000_common import setup_logging  # UEBERARBEITET (F-08)
+from .wt3000_common import output_dir, setup_logging  # UEBERARBEITET (F-08)
 from .wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
 from .wt3000_numeric import ItemTable, ValueStatus, read_numeric_values
 
@@ -104,8 +103,12 @@ def main() -> int:
     # WT3000_*-Umgebungsvariablen oder 'wt3000.json'. Siehe README.
     config = WTConfig.from_environment()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = Path.cwd() / f"wt3000_stage2_{timestamp}.txt"
-    backup_file = Path.cwd() / f"wt3000_itemtable_backup_{timestamp}.json"
+    # UEBERARBEITET: Projektwurzel statt Arbeitsverzeichnis - siehe
+    # wt3000_common.output_dir(). Die flache Ablage bleibt absichtlich,
+    # sie ist nur nicht mehr vom Startverzeichnis abhaengig.
+    ziel = output_dir()
+    log_file = ziel / f"wt3000_stage2_{timestamp}.txt"
+    backup_file = ziel / f"wt3000_itemtable_backup_{timestamp}.json"
     setup_logging(log_file)
     log = logging.getLogger("wt3000.stage2")
     log.info("Protokolldatei: %s", log_file)

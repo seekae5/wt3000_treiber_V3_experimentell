@@ -50,11 +50,24 @@ from wt3000_scpi.wt3000_transport import TmctlTransport  # noqa: E402
 
 
 def _kein_geraetezugriff(self, *args, **kwargs):
+    # UEBERARBEITET: Die Meldung nannte als einzige Ursache "Skript liegt unter
+    # tests/" und schickte damit in die Irre, sobald sie aus einem Skript kam,
+    # das laengst unter tools/hardware/ liegt. Ausgeloest wird die Sperre
+    # naemlich nicht vom Ablageort, sondern davon, DASS diese Datei importiert
+    # wurde - ein einziges 'from tests.conftest import ...' genuegt. Genau das
+    # ist bei tools/hardware/probe_current_range.py passiert, durch eine
+    # automatische Import-Ergaenzung der Entwicklungsumgebung.
     raise RuntimeError(
-        "TmctlTransport() aus der Testsuite heraus: diese Suite laeuft ohne "
-        "Geraet und ohne tmctl.dll. Fuer Tests 'FakeTransport' benutzen "
-        "(wt3000_scpi.wt3000_transport). Skripte, die wirklich mit dem Geraet "
-        "sprechen, gehoeren nach tools/hardware/ und nicht unter tests/."
+        "TmctlTransport() ist stillgelegt, weil tests/conftest.py importiert "
+        "wurde: die Testsuite laeuft ohne Geraet und ohne tmctl.dll.\n"
+        "  - In Tests: 'FakeTransport' benutzen "
+        "(wt3000_scpi.wt3000_transport).\n"
+        "  - In einem Geraeteskript unter tools/hardware/: pruefen, ob eine "
+        "Zeile 'from tests...' oder 'import conftest' im Modulkopf steht - "
+        "meist von der Entwicklungsumgebung automatisch ergaenzt. Aus tests/ "
+        "darf ein Geraeteskript NICHTS importieren.\n"
+        "  - Ein Skript, das wirklich mit dem Geraet spricht, gehoert nach "
+        "tools/hardware/ und nicht unter tests/."
     )
 
 

@@ -123,9 +123,17 @@ class WTConfig:
           4. Voreinstellung der Klasse   (neutral, siehe oben)
 
         Die Datei wird in dieser Reihenfolge gesucht: der Pfad aus
-        'config_file', dann WT3000_CONFIG, dann './wt3000.json', dann
+        'config_file', dann WT3000_CONFIG, dann 'wt3000.json' im
+        Arbeitsverzeichnis und in JEDEM Elternverzeichnis darueber, zuletzt
         '~/wt3000.json'. Die erste vorhandene gewinnt; fehlt sie ueberall,
         ist das kein Fehler.
+
+        UEBERARBEITET: Die Suche nach oben ist neu - vorher wurde nur im
+        Arbeitsverzeichnis selbst nachgesehen. Wer ein Skript aus einem
+        Unterverzeichnis startete (Entwicklungsumgebungen tun das
+        standardmaessig), bekam "Keine IP-Adresse gesetzt", obwohl die Datei
+        in der Projektwurzel lag. Die vollstaendige Liste liefert
+        'config_search_paths()'.
 
         Umgebungsvariablen heissen wie das Feld in Grossschrift mit Praefix:
         WT3000_IP, WT3000_DLL_PATH, WT3000_USER, WT3000_PASSWORD,
@@ -192,18 +200,55 @@ def _environment_values() -> dict[str, object]:
     return werte
 
 
-def _config_file_path(config_file: "str | Path | None") -> "Path | None":
-    """Erste vorhandene Konfigurationsdatei der Suchreihenfolge."""
+def config_search_paths(config_file: "str | Path | None" = None) -> list[Path]:
+    """Alle Orte, an denen nach der Konfigurationsdatei gesucht wird - in Reihenfolge.
+
+    Oeffentlich, weil eine Fehlermeldung sie aufzaehlen koennen muss: "keine
+    IP gesetzt" ist ohne die Liste der durchsuchten Orte kaum zu beheben.
+
+    UEBERARBEITET: Gesucht wurde bis hierher nur in 'Path.cwd()' - im
+    Arbeitsverzeichnis also, nicht im Projekt. Das hat die beiden Skripte
+    unter tools/hardware/ ausgebremst: Entwicklungsumgebungen starten ein
+    Skript ueblicherweise in SEINEM Verzeichnis, und dort liegt keine
+    'wt3000.json'. Herausgekommen ist die Meldung "Keine IP-Adresse gesetzt",
+    obwohl die Datei einen Sprung weiter oben lag und beim Start aus der
+    Projektwurzel dieselbe Datei anstandslos gefunden wurde.
+
+    Ab jetzt wird vom Arbeitsverzeichnis aus nach OBEN gesucht, bis zur
+    Wurzel des Dateisystems - dieselbe Regel, nach der git sein '.git' und
+    Werkzeuge ihre 'pyproject.toml' finden. Die naechstgelegene Datei
+    gewinnt; damit kann ein Unterverzeichnis weiterhin eine eigene
+    Konfiguration mitbringen, ohne dass das Projekt eine braucht.
+    """
     kandidaten: list[Path] = []
     if config_file is not None:
         kandidaten.append(Path(config_file))
     aus_umgebung = os.environ.get(f"{ENV_PREFIX}CONFIG")
     if aus_umgebung:
         kandidaten.append(Path(aus_umgebung))
-    kandidaten.append(Path.cwd() / CONFIG_FILE_NAME)
+    # Arbeitsverzeichnis und alle Elternverzeichnisse, von innen nach aussen.
+    startpunkt = Path.cwd()
+    for verzeichnis in (startpunkt, *startpunkt.parents):
+        kandidaten.append(verzeichnis / CONFIG_FILE_NAME)
     kandidaten.append(Path.home() / CONFIG_FILE_NAME)
 
+    # Dubletten entfernen, Reihenfolge behalten: liegt das Arbeitsverzeichnis
+    # unterhalb des Home-Verzeichnisses, steht dessen 'wt3000.json' sonst
+    # zweimal in der Liste - einmal als Elternverzeichnis, einmal als letzter
+    # Kandidat. Fuer die Suche ist das folgenlos, in der Fehlermeldung sieht es
+    # nach einem Fehler aus.
+    gesehen: set[Path] = set()
+    eindeutig: list[Path] = []
     for pfad in kandidaten:
+        if pfad not in gesehen:
+            gesehen.add(pfad)
+            eindeutig.append(pfad)
+    return eindeutig
+
+
+def _config_file_path(config_file: "str | Path | None") -> "Path | None":
+    """Erste vorhandene Konfigurationsdatei der Suchreihenfolge."""
+    for pfad in config_search_paths(config_file):
         if pfad.is_file():
             return pfad
     # Ein ausdruecklich benannter Pfad, den es nicht gibt, ist ein Fehler -
@@ -236,11 +281,36 @@ def _config_file_values(config_file: "str | Path | None") -> dict[str, object]:
             pfad,
             ", ".join(unbekannt),
         )
-    return {
+    werte = {
         feld: _wandeln(feld, wert) if isinstance(wert, str) else wert
         for feld, wert in inhalt.items()
         if feld in bekannt
     }
+
+    # UEBERARBEITET: Ein relativer 'dll_path' AUS DER DATEI gilt relativ zu
+    # dieser Datei, nicht zum Arbeitsverzeichnis.
+    #
+    # 'wt3000.json' in der Projektwurzel traegt "tools/tmctl64.dll". Aus der
+    # Wurzel heraus gestartet ging das gut; aus tools/hardware/ heraus suchte
+    # ctypes nach 'tools/hardware/tools/tmctl64.dll' und der Lauf brach mit
+    # "TMCTL-DLL nicht gefunden" ab - derselbe Startverzeichnis-Fehler wie bei
+    # der Suche nach der Datei selbst, nur eine Ebene spaeter.
+    #
+    # Dateirelativ ist zugleich die uebliche Bedeutung: wer einen Pfad in eine
+    # Konfigurationsdatei schreibt, meint ihn von dort aus. Umgebungsvariable
+    # und ausdruecklicher Parameter behalten ihre Bedeutung (relativ zum
+    # Arbeitsverzeichnis) - sie kommen ja auch von dort.
+    #
+    # Ein blosser Dateiname ('tmctl64.dll') bleibt unangetastet: den soll
+    # Windows selbst in PATH suchen, und ein Verzeichnis davorzusetzen wuerde
+    # genau das verhindern.
+    roher_pfad = werte.get("dll_path")
+    if isinstance(roher_pfad, str) and roher_pfad:
+        kandidat = Path(roher_pfad)
+        if len(kandidat.parts) > 1 and not kandidat.is_absolute():
+            werte["dll_path"] = str((pfad.parent / kandidat).resolve())
+
+    return werte
 
 
 def resolve_dll_path(dll_path: str) -> "str | Path":
@@ -364,10 +434,18 @@ class TmctlTransport:
         self._open = False
 
         if not config.ip:
+            # UEBERARBEITET: Die Meldung nannte die drei Wege, aber nicht die
+            # Orte. Genau daran haengt der haeufigste Fall: die Datei EXISTIERT,
+            # nur nicht dort, wo gesucht wurde - weil das Skript aus einem
+            # Unterverzeichnis heraus gestartet wurde. Ohne die Liste sieht das
+            # aus wie "Datei wird ignoriert" statt wie "woanders gesucht".
+            gesucht = "\n".join(f"    {p}" for p in config_search_paths())
             raise WTError(
                 "Keine IP-Adresse gesetzt. WTConfig() allein ist nicht "
                 f"verbindungsfaehig - {ENV_PREFIX}IP setzen, '{CONFIG_FILE_NAME}' "
-                "anlegen oder WTConfig.from_environment(ip=...) benutzen."
+                "anlegen oder WTConfig.from_environment(ip=...) benutzen.\n"
+                f"  Arbeitsverzeichnis: {Path.cwd()}\n"
+                f"  Gesucht wurde nach '{CONFIG_FILE_NAME}' in:\n{gesucht}"
             )
 
         dll = resolve_dll_path(config.dll_path)

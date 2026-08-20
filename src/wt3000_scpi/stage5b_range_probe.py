@@ -43,7 +43,7 @@ from pathlib import Path
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage5b_range_probe' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
-from .wt3000_common import setup_logging  # UEBERARBEITET (F-08)
+from .wt3000_common import output_dir, setup_logging  # UEBERARBEITET (F-08)
 from .wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
 # UEBERARBEITET (F-09): probe_write_capability -> probe_range_write_capability
 from .wt3000_ranging import RangeBackup, probe_range_write_capability
@@ -54,7 +54,12 @@ from .wt3000_rangeio import Quantity, RangeAccess
 # ---------------------------------------------------------------------------
 
 # Zielverzeichnis fuer Bericht, Backup und Protokoll.
-OUTPUT_DIR: Path = Path.cwd() / "konfiguration"
+# UEBERARBEITET: Ablage an der Projektwurzel statt an 'Path.cwd()'.
+# Bis hierher hing das am Arbeitsverzeichnis - ein Start aus einem
+# Unterverzeichnis (Entwicklungsumgebungen tun das standardmaessig) legte
+# ein zweites gleichnamiges Verzeichnis dort an. Siehe
+# wt3000_common.output_dir().
+OUTPUT_DIR: Path = output_dir("konfiguration")
 
 # Der Spannungsbereich dieses Elements wird bei --write-probe mit seinem
 # eigenen Wert ueberschrieben. Element 1 ist der erste Eintrag von

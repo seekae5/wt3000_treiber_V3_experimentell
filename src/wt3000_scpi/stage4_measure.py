@@ -17,7 +17,7 @@ from pathlib import Path
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage4_measure' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
-from .wt3000_common import setup_logging  # UEBERARBEITET (F-08)
+from .wt3000_common import output_dir, setup_logging  # UEBERARBEITET (F-08)
 from .wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
 from .wt3000_itemspec import (
     apply_item_table,
@@ -65,7 +65,12 @@ LOG_EVERY: int = 10
 CSV_DELIMITER: str = ","
 
 # Zielverzeichnis fuer CSV, Metadaten, Backup und Protokoll.
-OUTPUT_DIR: Path = Path.cwd() / "messungen"
+# UEBERARBEITET: Ablage an der Projektwurzel statt an 'Path.cwd()'.
+# Bis hierher hing das am Arbeitsverzeichnis - ein Start aus einem
+# Unterverzeichnis (Entwicklungsumgebungen tun das standardmaessig) legte
+# ein zweites gleichnamiges Verzeichnis dort an. Siehe
+# wt3000_common.output_dir().
+OUTPUT_DIR: Path = output_dir("messungen")
 
 # Freitext, landet in der Metadatendatei.
 RUN_COMMENT: str = ""
