@@ -73,6 +73,16 @@ def _kein_geraetezugriff(self, *args, **kwargs):
     )
 
 
+#: Der echte Konstruktor, bevor er stillgelegt wird.
+#
+# NEU (Schritt 5 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-04): Die
+# Fehlerwege IM Konstruktor - fehlende Bitness, fehlende abhaengige DLL,
+# Nicht-Windows - sind nur pruefbar, wenn man ihn tatsaechlich betritt. Genau
+# EIN Testmodul darf das (test_transport_fehlerpfade.py), und es kommt dabei
+# nie bis zu 'TmcInitialize': 'ct.WinDLL' wird vorher ersetzt, sodass der Lauf
+# im Ladeteil endet. Eine Verbindung entsteht also auch dort nicht.
+ECHTER_TMCTL_KONSTRUKTOR = TmctlTransport.__init__
+
 TmctlTransport.__init__ = _kein_geraetezugriff
 
 

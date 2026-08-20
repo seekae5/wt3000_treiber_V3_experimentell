@@ -18,7 +18,12 @@ from pathlib import Path
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage2_read_numeric' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
-from .wt3000_common import output_dir, setup_logging  # UEBERARBEITET (F-08)
+from .wt3000_common import (  # UEBERARBEITET (F-08)
+    condition_warnings,
+    output_dir,
+    parse_condition,
+    setup_logging,
+)
 from .wt3000_core import (
     TmctlTransport,
     WTConfig,
@@ -91,14 +96,13 @@ def check_preconditions(session: WTSession) -> None:
     rate = session.query(":RATE?")
     log.info("Datenaktualisierungsintervall: %s s (Polling: %.2f s)", rate, POLL_INTERVAL_S)
 
-    condition = session.query(":STATus:CONDition?")
-    bits = int(condition)
-    if bits & (1 << 4):
-        log.warning("Condition-Register Bit 4 (FOV): Frequenzmessung im Fehler")
-    if bits & (1 << 7):
-        log.warning("Condition-Register Bit 7 (PLLE): kein Signal an der PLL-Quelle")
-    if bits & 0x0F00:
-        log.warning("Condition-Register: Overrange an mindestens einem Element")
+    # UEBERARBEITET (Schritt 5b aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund
+    # A-06): parse_condition() statt int() - ein ValueError aus einer
+    # unerwarteten Antwort passierte 'except WTError' unbemerkt. Die
+    # Auswertung der Bits liegt seit S-02 einmal in wt3000_common; hier
+    # fehlte vorher Bit 15 (POV).
+    for meldung in condition_warnings(parse_condition(session.query(":STATus:CONDition?"))):
+        log.warning("%s", meldung)
 
     hold = session.query(":NUMeric:HOLD?")
     log.info("NUMeric:HOLD = %s (in Stufe 2 nicht genutzt)", hold)

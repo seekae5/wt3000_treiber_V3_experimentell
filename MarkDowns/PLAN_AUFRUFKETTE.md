@@ -691,7 +691,51 @@ leer. Der zweite Prüfsatz ist der eigentliche: es wurde nichts gesendet.
 
 ---
 
-### Schritt 5 — Rohe Fehlerwege übersetzen `S` · Befunde A-04, A-06
+### Schritt 5 — Rohe Fehlerwege übersetzen `S` · Befunde A-04, A-06 — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** 447 Tests grün (vorher 416), `ruff` und `mypy` sauber.
+> Nachweis: [tests/test_transport_fehlerpfade.py](../tests/test_transport_fehlerpfade.py)
+> (7 Prüfsätze, alle vorher rot) und
+> [tests/test_condition_parser.py](../tests/test_condition_parser.py) (24 Prüfsätze).
+>
+> **5a.** Der Ladeteil übersetzt jetzt `AttributeError` (Nicht-Windows) und `OSError`
+> (Bitness, fehlende abhängige DLL, verschwundenes Verzeichnis) in `WTError` mit der
+> Meldungsqualität von `resolve_dll_path()`. Die ursprüngliche Ausnahme bleibt als
+> `__cause__` erhalten — ohne sie wäre die Windows-Fehlernummer verloren, und genau die
+> unterscheidet „Datei fehlt" (126) von „falsche Bitness" (193). Dazu beide
+> `encode("ascii")`-Stellen, einschließlich der aus §1.2, die die Analyse nicht nennt.
+>
+> Für 5a musste `tests/conftest.py` den echten Konstruktor sichern
+> (`ECHTER_TMCTL_KONSTRUKTOR`), bevor es ihn stilllegt — die Fehlerwege liegen *im*
+> Konstruktor. Genau ein Testmodul benutzt ihn, und es kommt nie bis `TmcInitialize`:
+> `ct.WinDLL` ist vorher ersetzt, der Lauf endet im Ladeteil. Eine Verbindung entsteht
+> auch dort nicht.
+>
+> **5b.** `parse_nr1()`, `parse_condition()` und `condition_warnings()` in
+> `wt3000_common`; alle sechs Stellen umgestellt. Die Aufteilung in *parsen* und
+> *Meldungstexte zurückgeben* hält `wt3000_common` sitzungsfrei — es bekommt weder eine
+> `WTSession` noch einen fremden Logger.
+>
+> **Was dabei über den Plan hinaus zusammengeführt wurde.** Die Bit-Auswertung lag
+> viermal im Bestand, und drei Fassungen waren unvollständig: **Bit 15 (POV) kannte nur
+> Stufe 4.** Stufe 2, Stufe 3 und `WT3000.log_condition()` verschwiegen es. Ein Peak Over
+> am Eingang ist aber genau die Auffälligkeit, die eine Messreihe unbrauchbar macht — sie
+> in drei von vier Fällen nicht zu melden, war die schlechteste der möglichen
+> Aufteilungen. Jetzt melden alle vier dasselbe.
+>
+> **`wt3000_measure` ruft `condition_warnings()` bewusst NICHT auf.** Die Stelle liegt in
+> der laufenden Messschleife; eine Warnung je Zyklus über Stunden nützt niemandem. Dort
+> wird nur geparst — der Zustand wird aufgezeichnet, nicht kommentiert.
+>
+> **Ein Prüfsatz liest den Quelltext.** `test_kein_rohes_int_oder_float_mehr_auf_
+> geraeteantworten` sucht das Muster `int(…query(` bzw. `float(…query(` über alle
+> Paketmodule. Die Alternative — jede der sechs Stellen einzeln durchspielen — bräuchte
+> für `wt3000_measure` eine vollständige Messschleife. So bleibt der Befund auch für
+> künftige Stellen geschlossen.
+>
+> Durchstich am Ende gegen `FakeSession`: `:STATUS:CONDITION 32784` (mit Header) wird
+> verarbeitet statt abzustürzen, Stufe 3 meldet erstmals Bit 15, und `"unsinn"` ergibt
+> einen fangbaren `WTError` statt eines `ValueError`.
 
 Zwei Teile, getrennt committierbar, aber inhaltlich derselbe Vorgang: `except WTError` in
 den sieben Skripten zu dem machen, wofür es dasteht.

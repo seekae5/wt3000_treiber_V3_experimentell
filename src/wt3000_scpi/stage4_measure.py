@@ -17,7 +17,13 @@ from pathlib import Path
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 # Start ab jetzt ueber 'python -m wt3000_scpi.stage4_measure' - ein direkter
 # Aufruf der Datei kann relative Importe nicht aufloesen.
-from .wt3000_common import output_dir, setup_logging  # UEBERARBEITET (F-08)
+from .wt3000_common import (  # UEBERARBEITET (F-08)
+    condition_warnings,
+    output_dir,
+    parse_condition,
+    parse_nr3,
+    setup_logging,
+)
 from .wt3000_core import (
     TmctlTransport,
     WTConfig,
@@ -99,7 +105,8 @@ def check_preconditions(session: WTSession) -> None:
     if not fmt.upper().startswith("FLO"):
         raise WTError(f":NUMeric:FORMat ist {fmt!r}, erwartet 'FLO'")
 
-    rate = float(session.query(":RATE?"))
+    # UEBERARBEITET (Schritt 5b, Befund A-06): parse_nr3() statt float().
+    rate = parse_nr3(session.query(":RATE?"), ":RATE")
     if SAMPLE_INTERVAL_S < rate:
         log.warning(
             "Abtastintervall %.3f s liegt unter :RATE = %.3f s - "
@@ -108,15 +115,13 @@ def check_preconditions(session: WTSession) -> None:
             rate,
         )
 
-    condition = int(session.query(":STATus:CONDition?"))
-    if condition & (1 << 4):
-        log.warning("Condition Bit 4 (FOV): Frequenzmessung im Fehler")
-    if condition & (1 << 7):
-        log.warning("Condition Bit 7 (PLLE): kein Signal an der PLL-Quelle")
-    if condition & 0x0F00:
-        log.warning("Condition: Overrange an mindestens einem Element")
-    if condition & (1 << 15):
-        log.warning("Condition Bit 15 (POV): Peak Over an mindestens einem Eingang")
+    # UEBERARBEITET (Schritt 5b aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund
+    # A-06): parse_condition() statt int() - ein ValueError aus einer
+    # unerwarteten Antwort passierte 'except WTError' unbemerkt. Die
+    # Auswertung der Bits liegt seit S-02 einmal in wt3000_common; diese
+    # Stelle war die einzige vollstaendige und ist die Vorlage.
+    for meldung in condition_warnings(parse_condition(session.query(":STATus:CONDition?"))):
+        log.warning("%s", meldung)
 
 
 def main() -> int:

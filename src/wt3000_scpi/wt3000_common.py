@@ -146,6 +146,60 @@ def parse_nr3(response: str, context: str = "") -> float:
         raise WTError(f"Keine Zahl in der Antwort {response!r}{suffix}") from exc
 
 
+def parse_nr1(response: str, context: str = "") -> int:
+    """Ganzzahlantwort (Registerinhalt, Zaehler) in einen int wandeln.
+
+    NEU (Schritt 5b aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-06).
+    Gegenstueck zu parse_nr3() fuer die Faelle, in denen eine Gleitkommazahl
+    nicht das Richtige ist - ein Statusregister ist eine Bitmaske, kein Messwert.
+
+    Bis hierher gingen sechs Stellen im Bestand direkt ueber 'int(...)' bzw.
+    'float(...)' auf eine Geraeteantwort. Antwortet das Geraet unerwartet - mit
+    Header (weil jemand ':COMMunicate:HEADer 1' gesetzt hat), leer, oder mit
+    einer Mehrfachantwort -, verliess ein ValueError die Kette und passierte
+    'except WTError' in allen sieben Skripten.
+    """
+    text = strip_response_header(response)
+    try:
+        return int(text)
+    except ValueError as exc:
+        suffix = f" ({context})" if context else ""
+        raise WTError(f"Keine Ganzzahl in der Antwort {response!r}{suffix}") from exc
+
+
+def parse_condition(response: str) -> int:
+    """Antwort auf ':STATus:CONDition?' als Bitmaske lesen."""
+    return parse_nr1(response, ":STATus:CONDition")
+
+
+#: Bits des Condition-Registers, die eine Messreihe unbrauchbar machen koennen.
+#
+# UEBERARBEITET (Schritt 5b, Befund A-06 / S-02): diese Auswertung lag VIERMAL
+# im Bestand - stage2, stage3, stage4 und WT3000.log_condition() -, in leicht
+# abweichenden Fassungen. Nur Stufe 4 kannte Bit 15 (POV); Stufe 2, Stufe 3 und
+# die Fassade verschwiegen es. Ein Peak Over am Eingang ist aber genau die
+# Auffaelligkeit, die eine Messreihe unbrauchbar macht - sie in drei von vier
+# Faellen nicht zu melden, war die schlechteste der moeglichen Aufteilungen.
+_CONDITION_BITS: tuple[tuple[int, str], ...] = (
+    (1 << 4, "Condition Bit 4 (FOV): Frequenzmessung im Fehler"),
+    (1 << 7, "Condition Bit 7 (PLLE): kein Signal an der PLL-Quelle"),
+    (0x0F00, "Condition: Overrange an mindestens einem Element"),
+    (1 << 15, "Condition Bit 15 (POV): Peak Over an mindestens einem Eingang"),
+)
+
+
+def condition_warnings(bits: int) -> list[str]:
+    """Auffaelligkeiten des Condition-Registers als Meldungstexte.
+
+    Gibt die Texte ZURUECK, statt sie zu protokollieren: dieses Modul kennt
+    keine Sitzung und soll auch keinen Logger der Aufrufstelle bekommen. Wer
+    sie ausgibt, entscheidet der Aufrufer mit seinem eigenen Logger - und die
+    Messschleife in wt3000_measure ruft die Funktion bewusst NICHT auf, weil
+    eine Warnung je Zyklus ueber Stunden nichts nuetzt.
+    """
+    return [text for maske, text in _CONDITION_BITS if bits & maske]
+
+
 def parse_boolean(response: str, context: str = "") -> bool:
     """Boolean-Antwort auswerten. Das Geraet antwortet mit '1' bzw. '0'."""
     text = strip_response_header(response).upper()

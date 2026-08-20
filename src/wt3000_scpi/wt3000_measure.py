@@ -30,6 +30,9 @@ from types import TracebackType
 from typing import Protocol, runtime_checkable
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
+# UEBERARBEITET (Schritt 5b, Befund A-06): parse_condition() fuer die
+# Statusabfrage in der Messschleife.
+from .wt3000_common import parse_condition
 from .wt3000_core import WTError, WTSession
 from .wt3000_itemspec import ItemSpec
 from .wt3000_numeric import ItemTable, NumericValue, ValueStatus, read_numeric_values
@@ -501,7 +504,16 @@ def _loop_body(
 
                 condition: int | None = None
                 if record_condition:
-                    condition = int(session.query(":STATus:CONDition?"))
+                    # UEBERARBEITET (Schritt 5b, Befund A-06): die kritischste der
+                    # sechs Stellen - sie liegt INNERHALB der laufenden Schleife.
+                    # Ein ValueError beendete hier eine womoeglich stundenlange
+                    # Messreihe mit einem Traceback statt mit dem sauberen Abbruch,
+                    # fuer den _loop_body gebaut ist.
+                    #
+                    # Bewusst OHNE condition_warnings(): eine Warnung je Zyklus
+                    # ueber Stunden nuetzt niemandem. Der Zustand wird aufgezeichnet,
+                    # nicht kommentiert.
+                    condition = parse_condition(session.query(":STATus:CONDition?"))
 
                 number += 1
                 stats.samples = number

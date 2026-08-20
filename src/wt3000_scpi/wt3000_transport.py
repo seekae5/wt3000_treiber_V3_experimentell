@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import struct
+import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
@@ -503,13 +504,43 @@ class TmctlTransport:
 
         dll = resolve_dll_path(config.dll_path)
 
-        # Abhaengige DLLs liegen ueblicherweise im selben Verzeichnis. Bei
-        # einem blossen Dateinamen gibt es kein Verzeichnis, das man ergaenzen
-        # koennte - dann sucht Windows selbst.
-        if isinstance(dll, Path) and hasattr(os, "add_dll_directory"):
-            os.add_dll_directory(str(dll.parent))
+        # UEBERARBEITET (Schritt 5a aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund
+        # A-04): der Ladeteil uebersetzt seine Fehler jetzt in WTError.
+        #
+        # 'resolve_dll_path()' oben war schon sorgfaeltig - es nennt alle drei
+        # Abhilfen. Die beiden Zeilen danach waren es nicht, und sie decken die
+        # HAEUFIGEREN Faelle ab: fehlende abhaengige DLL, falsche Bitness, ein
+        # Verzeichnis, das es nicht mehr gibt. Alle sieben ausfuehrbaren
+        # Skripte fangen ausschliesslich WTError; ein OSError von hier lief an
+        # ihnen vorbei, 'raise SystemExit(main())' wurde nicht erreicht, und der
+        # Rueckgabewert 1 kam aus dem Traceback statt aus dem Skript.
+        #
+        # Massstab fuer die Meldungsqualitaet ist resolve_dll_path(): sagen,
+        # was nicht ging UND was zu tun ist.
+        try:
+            # Abhaengige DLLs liegen ueblicherweise im selben Verzeichnis. Bei
+            # einem blossen Dateinamen gibt es kein Verzeichnis, das man
+            # ergaenzen koennte - dann sucht Windows selbst.
+            if isinstance(dll, Path) and hasattr(os, "add_dll_directory"):
+                os.add_dll_directory(str(dll.parent))
 
-        self._tm = ct.WinDLL(str(dll))
+            self._tm = ct.WinDLL(str(dll))
+        except AttributeError as exc:
+            # Ausserhalb von Windows gibt es 'ctypes.WinDLL' nicht.
+            raise WTError(
+                f"ctypes.WinDLL steht auf dieser Plattform nicht zur Verfuegung "
+                f"({sys.platform}). TmctlTransport ist Windows-gebunden; fuer "
+                "geraetefreie Laeufe gibt es FakeTransport."
+            ) from exc
+        except OSError as exc:
+            raise WTError(
+                f"TMCTL-DLL {dll} konnte nicht geladen werden: {exc}\n"
+                "  Haeufigste Ursachen: falsche Bitness (64-Bit-Python braucht "
+                "tmctl64.dll, 32-Bit tmctl.dll), eine fehlende abhaengige DLL "
+                "im selben Verzeichnis, oder das Verzeichnis existiert nicht "
+                f"mehr. Pfad setzen ueber {ENV_PREFIX}DLL_PATH oder ueber "
+                f"'{CONFIG_FILE_NAME}'."
+            ) from exc
         self._declare_prototypes()
         self._initialize()
 
@@ -532,6 +563,22 @@ class TmctlTransport:
     def _initialize(self) -> None:
         """Verbindung aufbauen. Adressstring hat das Format 'ip,user,password'."""
         cfg = self._config
+        # UEBERARBEITET (Schritt 5a, Befund A-04): TMCTL nimmt den Adressstring
+        # als ASCII entgegen. Ein Umlaut im Passwort - nicht abwegig, wenn die
+        # Zugangsdaten aus 'wt3000.json' kommen - brach den Verbindungsaufbau
+        # vorher mit einem nackten UnicodeEncodeError ab.
+        #
+        # Die Meldung nennt das FELD, nicht den Wert: sie landet seit Schritt 3
+        # in der Protokolldatei, und die wird archiviert und weitergereicht.
+        for feld, wert in (("ip", cfg.ip), ("user", cfg.user), ("password", cfg.password)):
+            try:
+                wert.encode("ascii")
+            except UnicodeEncodeError as exc:
+                raise WTError(
+                    f"Feld '{feld}' der Verbindungsparameter enthaelt ein Zeichen "
+                    f"ausserhalb von ASCII (Position {exc.start}). TMCTL nimmt den "
+                    "Adressstring nur als ASCII entgegen."
+                ) from exc
         address = f"{cfg.ip},{cfg.user},{cfg.password}".encode("ascii")
         self._check(
             self._tm.TmcInitialize(TM_CTL_ETHER, address, ct.byref(self._device_id)),
@@ -561,7 +608,17 @@ class TmctlTransport:
         (verifiziert mit '*IDN?').
         ZU VERIFIZIEREN: Verhalten bei mit ';' verketteten Kommandos.
         """
-        payload = command.encode("ascii")
+        # UEBERARBEITET (Schritt 5a, Befund A-04): ein Nicht-ASCII-Zeichen im
+        # Kommando - typischerweise ueber einen Parameter aus einer
+        # Konfigurationsdatei - warf einen nackten UnicodeEncodeError an allen
+        # 'except WTError' vorbei.
+        try:
+            payload = command.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ProtocolError(
+                f"Kommando enthaelt ein Zeichen ausserhalb von ASCII "
+                f"({command[exc.start:exc.end]!r} an Position {exc.start}): {command!r}"
+            ) from exc
         if len(payload) + 1 > MAX_PROGRAM_MESSAGE_BYTES:
             raise ProtocolError(
                 f"Programmnachricht zu lang ({len(payload)} Bytes), "

@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 
-from .wt3000_common import DEFAULT_ELEMENTS
+from .wt3000_common import DEFAULT_ELEMENTS, condition_warnings, parse_condition
 from .wt3000_core import TmctlTransport, Transport, WTConfig, WTError, WTSession
 from .wt3000_input import InputConfig, WiringUnit
 from .wt3000_itemspec import (
@@ -807,13 +807,12 @@ class WT3000:
 
     def log_condition(self) -> int:
         """':STATus:CONDition?' auswerten und Auffaelligkeiten protokollieren."""
-        bits = int(self._session.query(":STATus:CONDition?"))
-        if bits & (1 << 4):
-            _log.warning("Condition Bit 4 (FOV): Frequenzmessung im Fehler")
-        if bits & (1 << 7):
-            _log.warning("Condition Bit 7 (PLLE): kein Signal an der PLL-Quelle")
-        if bits & 0x0F00:
-            _log.warning("Condition: Overrange an mindestens einem Element")
+        # UEBERARBEITET (Schritt 5b, Befund A-06 / S-02): parse_condition()
+        # statt int(), und die Bitauswertung kommt aus wt3000_common statt
+        # aus einer vierten hauseigenen Fassung. Bit 15 (POV) fehlte hier.
+        bits = parse_condition(self._session.query(":STATus:CONDition?"))
+        for meldung in condition_warnings(bits):
+            _log.warning("%s", meldung)
         return bits
 
     def range_backup(self) -> RangeBackup:
