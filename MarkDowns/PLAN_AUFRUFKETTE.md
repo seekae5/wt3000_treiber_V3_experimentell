@@ -58,12 +58,17 @@ Ein Passwort mit Umlaut in `wt3000.json` — nicht abwegig — bricht den Verbin
 mit `UnicodeEncodeError` ab, also ebenfalls nicht als `WTError`. Der Fall gehört in
 Schritt 5 mit hinein und ist dort aufgeführt.
 
-### 1.3 — Eine unversionierte Änderung, die zurückgenommen gehört
+### 1.3 — Eine Änderung, die zurückgenommen gehört
 
-In der Arbeitskopie steht `tools/hardware/probe_current_range.py` mit
+*Nachtrag 2026-08-20:* Diese Änderung war beim Schreiben des Plans unversioniert und ist
+inzwischen als Teil von Commit `61ada7d` eingecheckt. An der Sache ändert das nichts —
+sie gehört weiterhin zurückgenommen, jetzt eben als eigener Commit statt als Verwerfen
+der Arbeitskopie.
+
+`tools/hardware/probe_current_range.py` steht auf
 
 ```python
-TEST_VALUE: float = 0.75      # committet: 0.5
+TEST_VALUE: float = 0.75      # vorher: 0.5
 ```
 
 Der Kommentar unmittelbar darüber führt die gültigen Stufen auf
@@ -238,7 +243,29 @@ Namen.
 
 ---
 
-### Schritt 1 — REMOTE in Stufe 3 und 4 garantieren `XS` · Befund A-01
+### Schritt 1 — REMOTE in Stufe 3 und 4 garantieren `XS` · Befund A-01 — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** Eingebaut wie unten beschrieben (äußeres `finally` um den
+> Nutzteil, Fassung von Stufe 2). Nachweis:
+> [tests/test_stage_remote_release.py](../tests/test_stage_remote_release.py), 10 Prüfsätze
+> über beide Stufen. **Vor der Reparatur rot waren genau zwei** — der Fall, in dem die
+> Ausnahme aus der *Wiederherstellung* kommt; die übrigen acht waren bereits grün und sind
+> Absicherungen, keine Nachweise. Der Grund steht im Dateikopf des Testmoduls: kam die
+> Ausnahme aus dem Nutzteil, lief der `finally`-Rumpf durch und erreichte sein
+> `disable_remote()` noch. Nur ein Abbruch *im Restore-Block* übersprang die Zeile.
+>
+> Die Testvorrichtung steht vorerst lokal im Testmodul und trägt Stufe 3 und 4 bereits —
+> Schritt 0c hebt sie später nach `conftest.py`. Die Fallunterscheidung
+> `OUTPUT_DIR`-Konstante gegen `output_dir()`-Aufruf (Befund A-10) musste dafür schon hier
+> überbrückt werden; sie steht als `_ausgabeziel_umlenken()` im Testmodul und fällt mit
+> Schritt 0b weg. Ohne sie schriebe Stufe 3 ihr Backup-JSON bei jedem Testlauf in die
+> Projektwurzel.
+>
+> Nebenbei: vier Zeilen gingen durch die zusätzliche Einrückung über die 100-Spalten-Grenze
+> und wurden umbrochen. `git diff -w` zeigt deshalb 42 statt 182 geänderte Zeilen — die
+> eigentliche Änderung ist klein, der Rest ist Einrückung.
+>
+> Geprüft: 316 Tests grün (vorher 306), `ruff` sauber, `mypy` sauber.
 
 **Orte:** [stage3_own_itemtable.py:192–214](../src/wt3000_scpi/stage3_own_itemtable.py#L192),
 [stage4_measure.py:211–231](../src/wt3000_scpi/stage4_measure.py#L211)

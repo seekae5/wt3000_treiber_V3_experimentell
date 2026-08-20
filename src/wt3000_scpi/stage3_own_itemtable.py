@@ -141,76 +141,95 @@ def main() -> int:
                 session.enable_remote()
 
             try:
-                check_preconditions(session)
+                try:
+                    check_preconditions(session)
 
-                # 1) Ist-Zustand sichern - vor jedem Schreibzugriff.
-                backup = ItemTable.read_from_device(session)
-                target = build_item_table(TARGET_ITEMS)
+                    # 1) Ist-Zustand sichern - vor jedem Schreibzugriff.
+                    backup = ItemTable.read_from_device(session)
+                    target = build_item_table(TARGET_ITEMS)
 
-                # Items jenseits von NUMber sichern, falls die Zieltabelle
-                # weiter reicht als das, was :NUMeric:NORMal? ausgibt.
-                tail = probe_extra_items(
-                    session,
-                    first_index=len(backup.items) + 1,
-                    last_index=len(target.items),
-                )
-                save_backup_bundle(backup_file, backup, tail)
-
-                # 2) Fail-Fast: nur ein einziges Item schreiben und pruefen.
-                probe_item_write_capability(session, target, backup)
-
-                # 3) Vollstaendige Zieltabelle schreiben inkl. NUMber.
-                apply_item_table(session, target)
-
-                # 4) Zuruecklesen und Feld fuer Feld vergleichen.
-                problems = verify_item_table(session, target)
-                if problems:
-                    for problem in problems:
-                        log.error("Verifikation: %s", problem)
-                    raise WTError(f"{len(problems)} Abweichung(en) beim Verifizieren der Tabelle")
-
-                # 5) Messwerte lesen. Eine Aktualisierungsperiode abwarten,
-                #    damit der erste Block sicher zur neuen Tabelle passt.
-                time.sleep(POLL_INTERVAL_S)
-                for cycle in range(1, READ_CYCLES + 1):
-                    statistics = read_and_log(session, target, cycle)
-                    log.info(
-                        "Statusverteilung: OK=%d, NO_DATA=%d, OVERRANGE=%d",
-                        statistics[ValueStatus.OK],
-                        statistics[ValueStatus.NO_DATA],
-                        statistics[ValueStatus.OVERRANGE],
+                    # Items jenseits von NUMber sichern, falls die Zieltabelle
+                    # weiter reicht als das, was :NUMeric:NORMal? ausgibt.
+                    tail = probe_extra_items(
+                        session,
+                        first_index=len(backup.items) + 1,
+                        last_index=len(target.items),
                     )
-                    if cycle < READ_CYCLES:
-                        time.sleep(POLL_INTERVAL_S)
+                    save_backup_bundle(backup_file, backup, tail)
 
-                session.assert_no_error("Messwertabfrage")
+                    # 2) Fail-Fast: nur ein einziges Item schreiben und pruefen.
+                    probe_item_write_capability(session, target, backup)
 
-            except WTError as exc:
-                log.error("Abbruch: %s", exc)
-                exit_code = 1
+                    # 3) Vollstaendige Zieltabelle schreiben inkl. NUMber.
+                    apply_item_table(session, target)
 
+                    # 4) Zuruecklesen und Feld fuer Feld vergleichen.
+                    problems = verify_item_table(session, target)
+                    if problems:
+                        for problem in problems:
+                            log.error("Verifikation: %s", problem)
+                        raise WTError(
+                            f"{len(problems)} Abweichung(en) beim Verifizieren der Tabelle"
+                        )
+
+                    # 5) Messwerte lesen. Eine Aktualisierungsperiode abwarten,
+                    #    damit der erste Block sicher zur neuen Tabelle passt.
+                    time.sleep(POLL_INTERVAL_S)
+                    for cycle in range(1, READ_CYCLES + 1):
+                        statistics = read_and_log(session, target, cycle)
+                        log.info(
+                            "Statusverteilung: OK=%d, NO_DATA=%d, OVERRANGE=%d",
+                            statistics[ValueStatus.OK],
+                            statistics[ValueStatus.NO_DATA],
+                            statistics[ValueStatus.OVERRANGE],
+                        )
+                        if cycle < READ_CYCLES:
+                            time.sleep(POLL_INTERVAL_S)
+
+                    session.assert_no_error("Messwertabfrage")
+
+                except WTError as exc:
+                    log.error("Abbruch: %s", exc)
+                    exit_code = 1
+
+                finally:
+                    # 6) Wiederherstellung in derselben Sitzung - die Verbindung
+                    #    steht noch, das ist zuverlaessiger als ein zweiter Aufbau.
+                    if backup is not None:
+                        try:
+                            written = restore_item_table(
+                                session, backup, tail, force=FORCE_FULL_RESTORE
+                            )
+                            log.info("Wiederherstellung abgeschlossen (%d Kommandos)", written)
+                            remaining = verify_item_table(session, backup)
+                            if remaining:
+                                for problem in remaining:
+                                    log.error("Restore-Kontrolle: %s", problem)
+                            else:
+                                log.info(
+                                    "Restore-Kontrolle: Ausgangszustand exakt wiederhergestellt"
+                                )
+                        except WTError as exc:
+                            log.error(
+                                "Wiederherstellung fehlgeschlagen: %s - Backup liegt unter %s",
+                                exc,
+                                backup_file,
+                            )
+                            exit_code = 1
             finally:
-                # 6) Wiederherstellung in derselben Sitzung - die Verbindung
-                #    steht noch, das ist zuverlaessiger als ein zweiter Aufbau.
-                if backup is not None:
-                    try:
-                        written = restore_item_table(
-                            session, backup, tail, force=FORCE_FULL_RESTORE
-                        )
-                        log.info("Wiederherstellung abgeschlossen (%d Kommandos)", written)
-                        remaining = verify_item_table(session, backup)
-                        if remaining:
-                            for problem in remaining:
-                                log.error("Restore-Kontrolle: %s", problem)
-                        else:
-                            log.info("Restore-Kontrolle: Ausgangszustand exakt wiederhergestellt")
-                    except WTError as exc:
-                        log.error(
-                            "Wiederherstellung fehlgeschlagen: %s - Backup liegt unter %s",
-                            exc,
-                            backup_file,
-                        )
-                        exit_code = 1
+                # UEBERARBEITET (Schritt 1 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-01):
+                # eigenes 'finally' um den gesamten Nutzteil. Vorher stand dieser Aufruf
+                # im RUMPF des Wiederherstellungs-finally, hinter einem 'except WTError'.
+                # Jede andere Ausnahme - ein KeyError aus dem Restore, ein Strg+C -
+                # uebersprang ihn und lief aus dem 'with TmctlTransport(...)' heraus: der
+                # Transport war dann zu, ':COMMunicate:REMote OFF' nicht mehr moeglich,
+                # das Bedienfeld blieb gesperrt. Der Anwender musste am Geraet LOCAL
+                # druecken.
+                #
+                # Das ist die Fassung, die Stufe 2 seit F-07 hat. Sie ist gefahrlos, weil
+                # disable_remote() selbst idempotent ist (WTSession._remote_active) und
+                # WTError intern abfaengt - der Aufruf kann eine gerade laufende Ausnahme
+                # also nicht verdraengen.
                 session.disable_remote()
 
     except WTError as exc:

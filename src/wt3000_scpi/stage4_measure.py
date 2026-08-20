@@ -146,88 +146,107 @@ def main() -> int:
                 session.enable_remote()
 
             try:
-                check_preconditions(session)
+                try:
+                    check_preconditions(session)
 
-                # 1) Ist-Zustand sichern.
-                backup = ItemTable.read_from_device(session)
-                target = build_item_table(specs)
-                tail = probe_extra_items(
-                    session,
-                    first_index=len(backup.items) + 1,
-                    last_index=len(target.items),
-                )
-                save_backup_bundle(backup_file, backup, tail)
+                    # 1) Ist-Zustand sichern.
+                    backup = ItemTable.read_from_device(session)
+                    target = build_item_table(specs)
+                    tail = probe_extra_items(
+                        session,
+                        first_index=len(backup.items) + 1,
+                        last_index=len(target.items),
+                    )
+                    save_backup_bundle(backup_file, backup, tail)
 
-                # 2) Fail-Fast, dann Tabelle schreiben und verifizieren.
-                probe_item_write_capability(session, target, backup)
-                apply_item_table(session, target)
-                problems = verify_item_table(session, target)
-                if problems:
-                    for problem in problems:
-                        log.error("Verifikation: %s", problem)
-                    raise WTError(f"{len(problems)} Abweichung(en) beim Verifizieren der Tabelle")
-
-                # 3) Metadaten sichern, bevor die Messung startet.
-                write_metadata(
-                    meta_file,
-                    session,
-                    target,
-                    parameters={
-                        "sample_interval_s": SAMPLE_INTERVAL_S,
-                        "max_samples": MAX_SAMPLES,
-                        "max_duration_s": MAX_DURATION_S,
-                        "use_hold": USE_HOLD,
-                        "record_condition": RECORD_CONDITION,
-                        "csv_file": csv_file.name,
-                        "comment": RUN_COMMENT,
-                    },
-                )
-
-                # 4) Messschleife.
-                # UEBERARBEITET (ROADMAP M4-2): Spaltenkopf und Lebenszyklus der
-                # Senke liegen jetzt in der Schleife - hier wird sie nur gebaut.
-                # Ein anderes Ausgabeformat waere an dieser Stelle ein anderer
-                # Klassenname und sonst nichts.
-                log.info("Start der Messung. Abbruch jederzeit mit Strg+C.")
-                stats = run_measurement_loop(
-                    session=session,
-                    table=target,
-                    sink=CsvSink(csv_file, delimiter=CSV_DELIMITER),
-                    interval_s=SAMPLE_INTERVAL_S,
-                    max_samples=MAX_SAMPLES,
-                    max_duration_s=MAX_DURATION_S,
-                    use_hold=USE_HOLD,
-                    record_condition=RECORD_CONDITION,
-                    log_every=LOG_EVERY,
-                )
-                stats.log_summary(SAMPLE_INTERVAL_S)
-
-                session.assert_no_error("Messschleife")
-
-            except WTError as error:
-                log.error("Abbruch: %s", error)
-                exit_code = 1
-
-            finally:
-                # 5) Ausgangszustand wiederherstellen - in derselben Sitzung.
-                if backup is not None:
-                    try:
-                        written = restore_item_table(session, backup, tail)
-                        log.info("Wiederherstellung abgeschlossen (%d Kommandos)", written)
-                        remaining = verify_item_table(session, backup)
-                        if remaining:
-                            for problem in remaining:
-                                log.error("Restore-Kontrolle: %s", problem)
-                            exit_code = 1
-                        else:
-                            log.info("Restore-Kontrolle: Ausgangszustand exakt wiederhergestellt")
-                    except WTError as error:
-                        log.error(
-                            "Wiederherstellung fehlgeschlagen: %s - Backup: %s",
-                            error,
-                            backup_file,
+                    # 2) Fail-Fast, dann Tabelle schreiben und verifizieren.
+                    probe_item_write_capability(session, target, backup)
+                    apply_item_table(session, target)
+                    problems = verify_item_table(session, target)
+                    if problems:
+                        for problem in problems:
+                            log.error("Verifikation: %s", problem)
+                        raise WTError(
+                            f"{len(problems)} Abweichung(en) beim Verifizieren der Tabelle"
                         )
-                        exit_code = 1
+
+                    # 3) Metadaten sichern, bevor die Messung startet.
+                    write_metadata(
+                        meta_file,
+                        session,
+                        target,
+                        parameters={
+                            "sample_interval_s": SAMPLE_INTERVAL_S,
+                            "max_samples": MAX_SAMPLES,
+                            "max_duration_s": MAX_DURATION_S,
+                            "use_hold": USE_HOLD,
+                            "record_condition": RECORD_CONDITION,
+                            "csv_file": csv_file.name,
+                            "comment": RUN_COMMENT,
+                        },
+                    )
+
+                    # 4) Messschleife.
+                    # UEBERARBEITET (ROADMAP M4-2): Spaltenkopf und Lebenszyklus der
+                    # Senke liegen jetzt in der Schleife - hier wird sie nur gebaut.
+                    # Ein anderes Ausgabeformat waere an dieser Stelle ein anderer
+                    # Klassenname und sonst nichts.
+                    log.info("Start der Messung. Abbruch jederzeit mit Strg+C.")
+                    stats = run_measurement_loop(
+                        session=session,
+                        table=target,
+                        sink=CsvSink(csv_file, delimiter=CSV_DELIMITER),
+                        interval_s=SAMPLE_INTERVAL_S,
+                        max_samples=MAX_SAMPLES,
+                        max_duration_s=MAX_DURATION_S,
+                        use_hold=USE_HOLD,
+                        record_condition=RECORD_CONDITION,
+                        log_every=LOG_EVERY,
+                    )
+                    stats.log_summary(SAMPLE_INTERVAL_S)
+
+                    session.assert_no_error("Messschleife")
+
+                except WTError as error:
+                    log.error("Abbruch: %s", error)
+                    exit_code = 1
+
+                finally:
+                    # 5) Ausgangszustand wiederherstellen - in derselben Sitzung.
+                    if backup is not None:
+                        try:
+                            written = restore_item_table(session, backup, tail)
+                            log.info("Wiederherstellung abgeschlossen (%d Kommandos)", written)
+                            remaining = verify_item_table(session, backup)
+                            if remaining:
+                                for problem in remaining:
+                                    log.error("Restore-Kontrolle: %s", problem)
+                                exit_code = 1
+                            else:
+                                log.info(
+                                    "Restore-Kontrolle: Ausgangszustand exakt wiederhergestellt"
+                                )
+                        except WTError as error:
+                            log.error(
+                                "Wiederherstellung fehlgeschlagen: %s - Backup: %s",
+                                error,
+                                backup_file,
+                            )
+                            exit_code = 1
+            finally:
+                # UEBERARBEITET (Schritt 1 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-01):
+                # eigenes 'finally' um den gesamten Nutzteil. Vorher stand dieser Aufruf
+                # im RUMPF des Wiederherstellungs-finally, hinter einem 'except WTError'.
+                # Jede andere Ausnahme - ein KeyError aus dem Restore, ein Strg+C -
+                # uebersprang ihn und lief aus dem 'with TmctlTransport(...)' heraus: der
+                # Transport war dann zu, ':COMMunicate:REMote OFF' nicht mehr moeglich,
+                # das Bedienfeld blieb gesperrt. Der Anwender musste am Geraet LOCAL
+                # druecken.
+                #
+                # Das ist die Fassung, die Stufe 2 seit F-07 hat. Sie ist gefahrlos, weil
+                # disable_remote() selbst idempotent ist (WTSession._remote_active) und
+                # WTError intern abfaengt - der Aufruf kann eine gerade laufende Ausnahme
+                # also nicht verdraengen.
                 session.disable_remote()
 
     except WTError as error:
