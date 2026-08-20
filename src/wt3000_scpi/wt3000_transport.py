@@ -154,9 +154,31 @@ class WTConfig:
         return replace(self, **gesetzt)  # type: ignore[arg-type]
 
     def describe(self) -> str:
-        """Kurzform fuer Protokolle - OHNE Passwort."""
+        """Kurzform fuer Protokolle - OHNE Passwort.
+
+        UEBERARBEITET (Schritt 3 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund
+        A-08/A-09): 'use_remote' und 'timeout_ms' sind dazugekommen.
+
+        Die Zeile wird seit Schritt 3 von allen sieben ausfuehrbaren Skripten
+        in den Protokollkopf geschrieben - sie ist damit die Antwort auf die
+        Frage, gegen welches Geraet und mit welchen Parametern ein archivierter
+        Lauf stattgefunden hat. Ohne 'use_remote' beantwortete sie genau die
+        Frage nicht, die am meisten wiegt: der Wert entscheidet, ob das
+        Bedienfeld waehrend des Laufs gesperrt ist, kommt aus der Umgebung oder
+        aus 'wt3000.json' und ist am Aufruf nicht abzulesen (A-09). Fuer eine
+        Integrationsmessung ueber Stunden ist das die Entscheidung, die der
+        Kommentar an 'use_remote' selbst als "an der Aufrufstelle zu
+        dokumentieren" bezeichnet.
+
+        Das Passwort bleibt ausgenommen. Ein Protokoll wird archiviert und
+        weitergereicht; es ist der falsche Ort fuer Zugangsdaten.
+        """
         anmeldung = f", Benutzer {self.user}" if self.user else ", ohne Anmeldung"
-        return f"{self.ip or '<keine IP>'}{anmeldung}, DLL {self.dll_path}"
+        return (
+            f"{self.ip or '<keine IP>'}{anmeldung}, DLL {self.dll_path}, "
+            f"Timeout {self.timeout_ms} ms, "
+            f"REMOTE {'ein' if self.use_remote else 'aus'}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +278,37 @@ def _config_file_path(config_file: "str | Path | None") -> "Path | None":
     if config_file is not None and not Path(config_file).is_file():
         raise WTError(f"Konfigurationsdatei nicht gefunden: {config_file}")
     return None
+
+
+def config_file_in_use(config_file: "str | Path | None" = None) -> "Path | None":
+    """Die Konfigurationsdatei, die 'from_environment()' tatsaechlich liest.
+
+    NEU (Schritt 3 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-08/A-10).
+
+    Gegenstueck zu 'config_search_paths()', das alle Kandidaten aufzaehlt:
+    diese Funktion nennt den EINEN, der gewinnt - oder None, wenn keine Datei
+    existiert und die Voreinstellungen greifen.
+
+    Oeffentlich aus demselben Grund wie 'config_search_paths()': ein Protokoll
+    muss die Herkunft nennen koennen. Befund A-10 beschreibt, warum das mehr
+    als Kosmetik ist - 'config_search_paths()' sucht aufwaerts nach
+    'wt3000.json', 'find_project_root()' aufwaerts nach 'pyproject.toml' ODER
+    '.git' ODER 'wt3000.json'. Im Normalfall ist das dasselbe Verzeichnis; wird
+    ein Skript aus einem Unterprojekt mit eigener 'pyproject.toml' gestartet,
+    liest es die Konfiguration von weiter oben und legt die Ausgabe weiter
+    unten ab. Stehen beide aufgeloesten Pfade im Protokollkopf, faellt genau
+    das auf.
+
+    Ohne diese Funktion muesste ein Stufenskript '_config_file_path()' benutzen
+    - einen privaten Namen aus Layer 0, also genau die Sorte Zugriff, die die
+    Schichtung verhindern soll.
+
+    Die Datei wird NICHT gelesen. Waere es anders, meldete ein Syntaxfehler
+    sich zweimal - einmal hier und einmal in 'from_environment()' -, und die
+    Protokollzeile, die die Herkunft nennen soll, braeche selbst ab. Genau
+    diese Zeile wird aber gebraucht, um die kaputte Datei zu benennen.
+    """
+    return _config_file_path(config_file)
 
 
 def _config_file_values(config_file: "str | Path | None") -> dict[str, object]:

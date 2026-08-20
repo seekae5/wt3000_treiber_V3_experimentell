@@ -27,6 +27,7 @@ from .wt3000_transport import (
     Transport,
     WTConfig,
     WTError,
+    config_file_in_use,
 )
 
 # Haelt fest, dass die durchgereichten Namen zur Schnittstelle dieses Moduls
@@ -42,6 +43,11 @@ __all__ = [
     "Transport",
     "WTConfig",
     "WTError",
+    # NEU (Schritt 3, Befund A-08): die Herkunft der Konfiguration fuer den
+    # Protokollkopf. Zeigt zugleich, was Befund A-12 meint - ein neuer
+    # Layer-0-Name muss durch diese Weiterleitung nachgezogen werden, sonst
+    # erreicht ihn kein einziges Stufenskript.
+    "config_file_in_use",
     # hier beheimatet (Layer 1)
     "MAX_BLOCK_READS",
     "DeviceError",

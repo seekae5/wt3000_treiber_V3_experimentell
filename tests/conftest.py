@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 
@@ -246,8 +247,17 @@ def stufenlauf(monkeypatch, tmp_path):
       setup_logging    setzt die Handler des Root-Loggers neu und raeumte damit
                        mitten im Testlauf pytests Log-Mitschnitt ab; alles nach
                        dem Aufruf fehlte dann in 'caplog.records'. Nachgestellt
-                       und bestaetigt. Geprueft wird hier der Ablauf, nicht die
+                       und bestaetigt. Geprueft wird meist der Ablauf, nicht die
                        Protokolleinrichtung.
+
+    'logging_stilllegen=False' laesst setup_logging() laufen - gebraucht fuer
+    genau die Pruefsaetze, bei denen es auf die REIHENFOLGE ankommt: ob eine
+    Meldung vor oder nach der Einrichtung des Protokolls entsteht (Befund
+    A-08). Mit stillgelegtem setup_logging waere das nicht pruefbar, weil
+    caplog unabhaengig davon mitschneidet - der Pruefsatz waere auch dann gruen,
+    wenn die Meldung neben die Protokolldatei fiele. Er muss deshalb die DATEI
+    lesen. Die Handler werden danach zurueckgesetzt; ohne das Schliessen des
+    FileHandlers bliebe unter Windows ein Handle auf tmp_path offen.
 
     'use_remote' geht ausdruecklich ueber die Umgebung und nicht ueber die
     'wt3000.json' der Projektwurzel: stuende dort einmal 'use_remote: false',
@@ -255,6 +265,9 @@ def stufenlauf(monkeypatch, tmp_path):
     Leere, statt rot zu werden. Die Umgebung hat in der Aufloesungskette
     Vorrang vor der Datei.
     """
+    wurzel = logging.getLogger()
+    handler_vorher = list(wurzel.handlers)
+    level_vorher = wurzel.level
 
     def _vorbereiten(
         modul,
@@ -262,6 +275,7 @@ def stufenlauf(monkeypatch, tmp_path):
         *,
         ip: str = "10.0.0.5",
         use_remote: bool = True,
+        logging_stilllegen: bool = True,
     ) -> FakeTransport:
         monkeypatch.setenv("WT3000_IP", ip)
         monkeypatch.setenv("WT3000_USE_REMOTE", "1" if use_remote else "0")
@@ -269,7 +283,17 @@ def stufenlauf(monkeypatch, tmp_path):
         transport = FakeTransport(responses)
         monkeypatch.setattr(modul, "TmctlTransport", lambda _config: transport)
         monkeypatch.setattr(modul, "OUTPUT_DIR", tmp_path)
-        monkeypatch.setattr(modul, "setup_logging", lambda _pfad: None)
+        if logging_stilllegen:
+            monkeypatch.setattr(modul, "setup_logging", lambda _pfad: None)
         return transport
 
-    return _vorbereiten
+    yield _vorbereiten
+
+    for handler in list(wurzel.handlers):
+        if handler not in handler_vorher:
+            handler.close()
+            wurzel.removeHandler(handler)
+    for handler in handler_vorher:
+        if handler not in wurzel.handlers:
+            wurzel.addHandler(handler)
+    wurzel.setLevel(level_vorher)

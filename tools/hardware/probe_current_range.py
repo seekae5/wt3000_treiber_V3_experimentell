@@ -53,7 +53,13 @@ from datetime import datetime
 from pathlib import Path
 
 from wt3000_scpi.wt3000_common import output_dir, setup_logging
-from wt3000_scpi.wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
+from wt3000_scpi.wt3000_core import (
+    TmctlTransport,
+    WTConfig,
+    WTError,
+    WTSession,
+    config_file_in_use,
+)
 from wt3000_scpi.wt3000_rangeio import (
     Quantity,
     RangeAccess,
@@ -110,8 +116,6 @@ OUTPUT_DIR: Path = output_dir("konfiguration")
 
 def main() -> int:
     """Einen Wert per rangeio setzen und zuruecklesen. Rueckgabe: 0 = ok."""
-    # Verbindungsparameter aus der Auflaesungskette - siehe README.
-    config = WTConfig.from_environment()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = OUTPUT_DIR / f"wt3000_probe_current_range_{timestamp}.txt"
@@ -123,6 +127,29 @@ def main() -> int:
     exit_code = 0
 
     try:
+        # UEBERARBEITET (Schritt 3 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund
+        # A-08): die Aufloesungskette steht jetzt INNERHALB des try und HINTER
+        # setup_logging(). Bis hierher war sie der erste Aufruf von Layer 4 nach
+        # Layer 0 - und der einzige, der ausserhalb jeder Absicherung und vor
+        # der Einrichtung des Protokolls lag.
+        #
+        # Sie kann drei WTError werfen: nicht lesbare Datei, kein JSON-Objekt,
+        # nicht auswertbarer Feldwert. Eine kaputte 'wt3000.json' - der
+        # haeufigste Konfigurationsfehler ueberhaupt - endete deshalb als
+        # Traceback statt mit der Zeile "Abbruch: ...", der Rueckgabewert 1 kam
+        # aus dem Traceback statt aus dem Skript, und in der Protokolldatei
+        # stand nichts, weil es sie noch nicht gab.
+        #
+        # Die Umstellung kostet nichts: der Name der Protokolldatei haengt nur
+        # an OUTPUT_DIR und am Zeitstempel, nicht an der Konfiguration. Die
+        # bisherige Reihenfolge war historisch, nicht sachlich.
+        #
+        # config_file_in_use() steht VOR from_environment(), damit die kaputte
+        # Datei auch dann benannt ist, wenn das Lesen scheitert.
+        log.info("Konfigurationsdatei: %s", config_file_in_use() or "<keine, Voreinstellungen>")
+        config = WTConfig.from_environment()
+        log.info("Verbindung: %s", config.describe())
+
         with TmctlTransport(config) as transport:
             session = WTSession(transport, config, read_only=False)
             access = RangeAccess(session, allow_changes=True)

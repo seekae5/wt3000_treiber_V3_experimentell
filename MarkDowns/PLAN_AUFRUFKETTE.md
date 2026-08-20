@@ -501,7 +501,50 @@ bevor sie an ein Gerät gehen.
 
 ---
 
-### Schritt 3 — Der Anfang der Kette `XS` · Befund A-08
+### Schritt 3 — Der Anfang der Kette `XS` · Befund A-08 — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** Alle sieben Skripte umgestellt. Nachweis:
+> [tests/test_stage_startup.py](../tests/test_stage_startup.py), 33 Prüfsätze — 28 waren
+> vor der Umstellung rot, die fünf grünen betreffen Layer 0 (`describe()`,
+> `config_file_in_use()`) und wurden erst durch den Schritt selbst möglich.
+> 381 Tests grün (vorher 348), `ruff` und `mypy` sauber.
+>
+> **Warum die Prüfsätze die Protokolldatei lesen und nicht `caplog`.** Das ist der Punkt,
+> an dem dieser Schritt hätte scheinbar-grün werden können: `caplog` schneidet unabhängig
+> von `setup_logging()` mit. Ein Prüfsatz auf `caplog` wäre auch dann grün, wenn die
+> Warnung neben die Datei fällt — er prüfte genau das nicht, wofür man ihn baut. Deshalb
+> läuft `setup_logging()` in diesen Tests echt (`logging_stilllegen=False`, der Parameter,
+> den Schritt 0 bewusst offengelassen hatte) und der Nachweis kommt aus der Datei. Die
+> Fixture setzt die Handler danach zurück und **schließt den FileHandler** — sonst bleibt
+> unter Windows ein Handle auf `tmp_path` offen.
+>
+> **Neu in Layer 0: `config_file_in_use()`.** Der Plan verlangte die Herkunft der
+> Konfiguration im Protokollkopf, aber `WTConfig` merkt sich die gelesene Datei nicht. Ein
+> Feld dafür wäre falsch gewesen — `_felder()` iteriert über die Dataclass, ein neues Feld
+> würde also als `WT3000_*`-Variable setzbar und als bekannter JSON-Schlüssel gelten. Also
+> eine öffentliche Funktion neben `config_search_paths()`, die den *einen* gewinnenden
+> Pfad nennt. Sie **liest die Datei nicht**: täte sie es, meldete ein Syntaxfehler sich
+> zweimal, und die Zeile, die die kaputte Datei benennen soll, bräche selbst ab. Sie steht
+> deshalb *vor* `from_environment()`.
+>
+> **Zwei Funde beim Umbau:**
+>
+> * **A-12 wurde konkret.** `config_file_in_use()` musste durch die Weiterleitung in
+>   `wt3000_core` nachgezogen werden, sonst erreicht sie kein Stufenskript — die Analyse
+>   beschreibt genau diese Reibung. Der Eintrag in `__all__` ist entsprechend kommentiert.
+> * **„Verbindungsfehler" stimmte nicht mehr.** Stufe 3 und 4 beschrifteten ihren äußeren
+>   `except WTError` mit `Verbindungsfehler`, die anderen fünf mit `Abbruch`. Seit die
+>   Auflösungskette in diesem `try` liegt, fängt der Zweig auch eine kaputte
+>   `wt3000.json` — das ist kein Verbindungsfehler. Beide sagen jetzt `Abbruch`, wie die
+>   übrigen fünf. Aufgefallen ist das, weil zwei Prüfsätze rot blieben.
+>
+> **`describe()` erweitert** um `use_remote` und `timeout_ms` (Passwort bleibt ausgenommen,
+> eigener Prüfsatz). Ausgabe:
+> `192.168.10.20, Benutzer TEST, DLL tmctl64.dll, Timeout 5000 ms, REMOTE ein`
+>
+> Damit sind auch die beiden aus Schritt 0 offen gebliebenen Punkte erledigt: der
+> Parameter `logging_stilllegen` existiert samt Test, und der Protokollkopf nennt jetzt
+> beide aufgelösten Pfade — Herkunft der Konfiguration und Ziel der Ausgabe.
 
 **Orte:** `main()` in allen sieben ausführbaren Skripten.
 
