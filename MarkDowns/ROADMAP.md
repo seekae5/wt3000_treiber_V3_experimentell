@@ -1,6 +1,6 @@
 # Roadmap — vom Stufenskript zur Treiberbibliothek
 
-**Stand:** 2026-08-19, `wt3000-scpi 0.3.0` (M1-2 und M1-1 umgesetzt)
+**Stand:** 2026-08-20, `wt3000-scpi 0.3.0` (M1-2, M1-1 und M4-1 umgesetzt)
 **Bezug:** [AENDERUNGEN_2026-08-18.md](AENDERUNGEN_2026-08-18.md) (Fehlerprüfung, Befunde B-01…B-15)
 
 **Zielbild.** Der fertige Treiber kann fünf Dinge:
@@ -29,8 +29,8 @@ Umsetzung gegen IM WT3001E-17EN und das Gerät abzugleichen.
 | **2. Gerätekonfiguration einstellen** | nichts. Weder Kommunikation, noch Averaging, Integration, Harmonische, Setup-Speicher | **5 %** |
 | **3. Mess-Konfiguration lesen/anpassen** | `InputConfig` deckt Verdrahtung, Bereiche, Auto-Range, Crest, Filter, Skalierung, Sync, Modus, Rate ab. Snapshot mit `capture/save/load/diff/restore`. `RangePlan` als deklarativer Sollzustand für Bereiche | **75 %** |
 | **4. Messung starten und stoppen** | blockierende Schleife `run_measurement_loop()`, Abbruch nur per Strg+C. Keine aufrufbare Start/Stop-Schnittstelle, keine Gerätesteuerung (Integrator, Einzelmessung) | **30 %** |
-| **5. Messdaten exportieren** | `CsvRecorder` schreibt eine feste CSV. Kein Format-Wechsel möglich, keine Einheiten, kein Datensatz-Objekt | **40 %** |
-| *Querschnitt* | Transport, Sitzung, Fehlerklassen, Item-Tabelle, Blockparser, 124 gerätefreie Tests, saubere Schichtung | **solide Basis** |
+| **5. Messdaten exportieren** | `CsvRecorder` schreibt eine feste CSV. `Sample` als Datensatz-Objekt steht seit M4-1. Noch kein Format-Wechsel möglich, keine Einheiten | **55 %** |
+| *Querschnitt* | Transport, Sitzung, Fehlerklassen, Item-Tabelle, Blockparser, 254 gerätefreie Tests, saubere Schichtung | **solide Basis** |
 
 **Kurzfassung:** Die untere Hälfte (Transport, Protokoll, Zahlenformate, INPut-Gruppe)
 ist belastbar und getestet. Was fehlt, ist die obere Hälfte: eine benutzbare
@@ -382,14 +382,29 @@ Für Langzeitmessungen zwingend, heute gar nicht vorgesehen.
 
 ## M4 — Datenexport
 
-### M4-1 — Datensatz-Objekt statt Parameterliste `S`
-Heute wandert eine Messzeile als fünf getrennte Parameter in `CsvRecorder.write_row()`.
-Jedes weitere Ausgabeformat müsste diese Signatur nachbauen.
+### M4-1 — Datensatz-Objekt statt Parameterliste `S` — **umgesetzt 2026-08-20**
+Bis hierher wanderte eine Messzeile als fünf getrennte Parameter in
+`CsvRecorder.write_row()`. Jedes weitere Ausgabeformat hätte diese Signatur nachbauen
+müssen.
 
-- Dataclass `Sample`: Zeitstempel, verstrichene Zeit, laufende Nummer,
-  Condition-Register, `list[NumericValue]`, optional die Kennzeichnung aus M3-3/M3-4
-- Alles, was misst, liefert `Sample`; alles, was schreibt, nimmt `Sample`
-- **Fertig, wenn:** `Measurement` und Export nur noch über `Sample` verbunden sind
+- [x] Dataclass `Sample` (eingefroren): Zeitstempel, verstrichene Zeit, laufende Nummer,
+  Condition-Register, `list[NumericValue]`, plus `mark` für die Kennzeichnung aus
+  M3-3/M3-4. Dazu die Aufzählung `SampleMark` mit `OK`/`DUPLICATE`/`MISSING`
+- [x] Alles, was misst, liefert `Sample`; alles, was schreibt, nimmt `Sample`.
+  `CsvRecorder.write_row(...)` heißt jetzt `CsvRecorder.write(sample)` — derselbe Name,
+  den das `SampleSink`-Protocol aus M4-2 tragen wird. Bewusst **keine** Weiterleitung
+  unter dem alten Namen: die alte Signatur ist genau das, was dieser Punkt abschafft
+- [x] `Sample.status_flags(columns)` als gemeinsame Grundlage jedes Ausgabeformats. Die
+  Kennzeichnung des Zyklus wird in die vorhandene Spalte `status_flags` gefaltet — M3-3
+  und M3-4 brauchen dadurch **kein** geändertes Dateiformat
+- [x] **Fertig, wenn:** Messschleife und Export nur noch über `Sample` verbunden sind —
+  `tests/test_sample.py`, 13 Testfälle; Suite gesamt 254 statt 241
+
+Festgestellt und an M3-4 weitergereicht: ein `MISSING`-Datensatz trägt keine Messwerte
+und bricht damit an der Längenprüfung aus P-3 ab. Dort ist zu entscheiden, ob solche
+Zyklen mit `NO_DATA` aufgefüllt werden oder ob `write()` einen Sonderweg bekommt.
+
+Siehe [AENDERUNGEN_2026-08-20_M4-1.md](AENDERUNGEN_2026-08-20_M4-1.md).
 
 ### M4-2 — Sink-Protokoll: CSV als eine Implementierung von mehreren `M`
 Die vom Zielbild geforderte Erweiterbarkeit.
@@ -530,7 +545,7 @@ M3-1 ──> M3-2
 1. **M1-2 + M1-1** — Transport-Protokoll und Fassade. Danach ist der Treiber zum
    ersten Mal von außen benutzbar, und alles Weitere lässt sich gerätefrei testen.
 2. **M0** komplett — ein Messtermin, der vier offene Annahmen zu Feststellungen macht.
-3. **M4-1 + M4-2** — Export entkoppeln. Kleiner Aufwand, und ab da ist jedes weitere
+3. **M4-1** (erledigt) **+ M4-2** — Export entkoppeln. Kleiner Aufwand, und ab da ist jedes weitere
    Format eine Datei statt eines Eingriffs.
 4. **M3-1** — Messung steuerbar machen. Ab hier ist das Zielbild in Grundzügen erfüllt.
 5. **M2-1** — die fehlenden Gerätegruppen, gruppenweise, in der genannten Reihenfolge.

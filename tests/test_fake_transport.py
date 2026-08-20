@@ -29,7 +29,12 @@ from wt3000_scpi.wt3000_core import (
     WTError,  # NEU (P-3)
     WTSession,
 )
-from wt3000_scpi.wt3000_measure import CsvRecorder, run_measurement_loop, write_metadata
+from wt3000_scpi.wt3000_measure import (
+    CsvRecorder,
+    Sample,  # NEU (M4-1)
+    run_measurement_loop,
+    write_metadata,
+)
 from wt3000_scpi.wt3000_numeric import (
     FLOAT_NO_DATA,
     FLOAT_OVERRANGE,
@@ -389,12 +394,14 @@ def test_zu_wenige_werte_werden_nicht_geschrieben(tmp_path):
     ziel = tmp_path / "kurz.csv"
     with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
         with pytest.raises(WTError, match="Sample 1"):
-            recorder.write_row(
-                timestamp=datetime.now(timezone.utc),
-                elapsed_s=0.0,
-                sample=1,
-                condition=None,
-                values=messwerte(2),
+            recorder.write(
+                Sample(
+                    timestamp=datetime.now(timezone.utc),
+                    elapsed_s=0.0,
+                    number=1,
+                    condition=None,
+                    values=messwerte(2),
+                )
             )
 
     # Nur der Kopf steht in der Datei - keine halbe Zeile.
@@ -408,12 +415,14 @@ def test_zu_viele_werte_werden_nicht_geschrieben(tmp_path):
     ziel = tmp_path / "lang.csv"
     with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
         with pytest.raises(WTError, match="4 Messwerte"):
-            recorder.write_row(
-                timestamp=datetime.now(timezone.utc),
-                elapsed_s=0.0,
-                sample=7,
-                condition=None,
-                values=messwerte(4),
+            recorder.write(
+                Sample(
+                    timestamp=datetime.now(timezone.utc),
+                    elapsed_s=0.0,
+                    number=7,
+                    condition=None,
+                    values=messwerte(4),
+                )
             )
 
     assert len(list(csv.reader(ziel.open(encoding="utf-8")))) == 1
@@ -423,12 +432,14 @@ def test_passende_anzahl_wird_unveraendert_geschrieben(tmp_path):
     """Gegenprobe: die Pruefung darf den Regelfall nicht behindern."""
     ziel = tmp_path / "passend.csv"
     with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
-        recorder.write_row(
-            timestamp=datetime.now(timezone.utc),
-            elapsed_s=1.5,
-            sample=1,
-            condition=16,
-            values=messwerte(3),
+        recorder.write(
+            Sample(
+                timestamp=datetime.now(timezone.utc),
+                elapsed_s=1.5,
+                number=1,
+                condition=16,
+                values=messwerte(3),
+            )
         )
 
     kopf, zeile = list(csv.reader(ziel.open(encoding="utf-8")))
@@ -500,7 +511,8 @@ def test_hold_wird_auch_bei_einem_fehler_mitten_im_zyklus_abgeschaltet():
     tabelle = ItemTable.from_response("1;U,1")
 
     class Verweigerer:
-        def write_row(self, **_):  # pragma: no cover - wird nie erreicht
+        # UEBERARBEITET (M4-1): heisst jetzt write() und nimmt ein Sample.
+        def write(self, *_):  # pragma: no cover - wird nie erreicht
             raise AssertionError("es darf keine Zeile entstehen")
 
     with pytest.raises(TmctlError):

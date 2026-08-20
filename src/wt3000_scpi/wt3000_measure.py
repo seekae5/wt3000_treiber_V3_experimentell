@@ -15,8 +15,10 @@ import logging
 # das Modul wurde hier nie benutzt.
 import statistics
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from types import TracebackType
 from typing import TextIO
@@ -129,6 +131,100 @@ class NumericHold:
 
 
 # ---------------------------------------------------------------------------
+# NEU (ROADMAP M4-1): Layer 4 - der Datensatz
+# ---------------------------------------------------------------------------
+
+
+class SampleMark(Enum):
+    """Kennzeichnung eines ganzen Datensatzes - nicht eines einzelnen Werts.
+
+    Abzugrenzen von 'ValueStatus': der bewertet einen einzelnen Messwert
+    (NO_DATA, OVERRANGE) und kommt aus dem Bitmuster, das das Geraet liefert.
+    'SampleMark' bewertet den Zyklus als Ganzes und entsteht erst im Treiber,
+    aus dem Vergleich mit dem vorigen Zyklus.
+
+    DUPLICATE und MISSING werden heute von niemandem gesetzt - die Erkennung
+    ist ROADMAP M3-3 bzw. M3-4. Sie stehen hier trotzdem schon, weil M4-1 die
+    Stelle festlegt, an der sie kuenftig transportiert werden; ein Sink, der
+    jetzt gegen 'Sample' gebaut wird, muss dafuer spaeter nicht angefasst
+    werden.
+    """
+
+    OK = "OK"
+    #: M3-3: bitgleich zum vorigen Zyklus - das Geraet hat nicht aktualisiert.
+    DUPLICATE = "DUPLICATE"
+    #: M3-4: der Zyklus ist ausgefallen. Ein solcher Datensatz traegt keine
+    #: Werte; er steht in der Ausgabe, damit die Luecke sichtbar bleibt,
+    #: statt stillschweigend zu fehlen.
+    MISSING = "MISSING"
+
+
+@dataclass(frozen=True)
+class Sample:
+    """Ein vollstaendiger Messzyklus.
+
+    NEU (ROADMAP M4-1). Bis hierher wanderte eine Messzeile als fuenf
+    getrennte Parameter in 'CsvRecorder.write_row()'. Jedes weitere
+    Ausgabeformat haette diese Signatur nachbauen muessen - und jede
+    Erweiterung (die Kennzeichnung aus M3-3/M3-4) haette jede Fassung einzeln
+    getroffen. Ab jetzt gilt: alles, was misst, liefert 'Sample'; alles, was
+    schreibt, nimmt 'Sample'.
+
+    'timestamp' bezieht sich auf den Moment des ':NUMeric:HOLD ON', nicht auf
+    den Antworteingang - der Datensatz ist zu diesem Zeitpunkt im Geraet
+    eingefroren, das Auslesen danach dauert unbestimmt lange. 'elapsed_s'
+    zaehlt dagegen auf einer monotonen Uhr ab Beginn der Messreihe und ist
+    deshalb der richtige Bezug fuer Zeitdifferenzen; 'timestamp' folgt der
+    Systemuhr und kann springen.
+
+    Die Klasse ist eingefroren, weil ein einmal gelesener Datensatz sich nicht
+    mehr aendert. 'values' bleibt trotzdem eine veraenderliche Liste - dadurch
+    ist 'Sample' nicht hashbar, was hier niemanden stoert und die Liste bei
+    Messreihen mit 40 Items vor einer Kopie je Zyklus bewahrt.
+    """
+
+    #: Zeitpunkt des HOLD ON, zeitzonenbehaftet.
+    timestamp: datetime
+    #: Sekunden seit Beginn der Messreihe, monotone Uhr.
+    elapsed_s: float
+    #: Laufende Nummer ab 1.
+    number: int
+    #: ':STATus:CONDition?' oder None, wenn nicht mitgelesen.
+    condition: int | None
+    #: Messwerte in der Reihenfolge der Item-Tabelle.
+    values: list[NumericValue]
+    #: Bewertung des Zyklus. Siehe SampleMark.
+    mark: SampleMark = SampleMark.OK
+
+    def status_flags(self, column_names: Sequence[str]) -> list[str]:
+        """Alle Auffaelligkeiten des Datensatzes im Klartext.
+
+        Gemeinsame Grundlage jedes Ausgabeformats: der Aufrufer bekommt eine
+        Liste wie ['mark=DUPLICATE', 'U2=OVERRANGE'] und entscheidet selbst,
+        wie er sie unterbringt. 'CsvRecorder' haengt sie in die Spalte
+        'status_flags'; ein kuenftiger Sink (M4-2) kann sie anders fuehren.
+
+        Die Kennzeichnung des Zyklus steht bewusst VOR den Einzelwerten: bei
+        einem ausgefallenen Zyklus (MISSING) ist sie die einzige Angabe, die
+        es ueberhaupt gibt.
+
+        Ist 'column_names' kuerzer als 'values', bleiben die ueberzaehligen
+        Werte unerwaehnt - 'zip' bricht am kuerzeren Ende ab. Das ist hier
+        richtig so: die Laengenpruefung gehoert an die schreibende Stelle,
+        die den Spaltenkopf kennt, und findet dort auch statt.
+        """
+        flags: list[str] = []
+        if self.mark is not SampleMark.OK:
+            flags.append(f"mark={self.mark.value}")
+        flags.extend(
+            f"{name}={value.status.value}"
+            for name, value in zip(column_names, self.values)
+            if value.status is not ValueStatus.OK
+        )
+        return flags
+
+
+# ---------------------------------------------------------------------------
 # Layer 4 - CSV-Aufzeichnung
 # ---------------------------------------------------------------------------
 
@@ -167,15 +263,19 @@ class CsvRecorder:
             return ""
         return "INF"
 
-    def write_row(
-        self,
-        timestamp: datetime,
-        elapsed_s: float,
-        sample: int,
-        condition: int | None,
-        values: list[NumericValue],
-    ) -> None:
-        """Eine Messzeile schreiben und sofort flushen.
+    def write(self, sample: Sample) -> None:
+        """Einen Datensatz als Zeile schreiben und sofort flushen.
+
+        UEBERARBEITET (ROADMAP M4-1): hiess bis hierher 'write_row()' und nahm
+        die fuenf Bestandteile einzeln entgegen. Jetzt nimmt die Methode das
+        'Sample' - damit ist der Vertrag zwischen Messschleife und Ausgabe auf
+        einen Typ eingedampft, und ein zweites Ausgabeformat (M4-2) muss keine
+        fuenfstellige Signatur nachbauen. Der neue Name ist zugleich der, den
+        das 'SampleSink'-Protocol aus M4-2 tragen wird.
+
+        Bewusst KEIN 'write_row'-Rest als Weiterleitung: die alte Signatur ist
+        genau das, was M4-1 abschafft. Eine Weiterleitung haette sie am Leben
+        gehalten, und der naechste Sink haette sich wieder an ihr orientiert.
 
         UEBERARBEITET (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): Die Zeile wird
         gegen den Spaltenkopf geprueft, bevor irgendetwas geschrieben wird.
@@ -194,27 +294,25 @@ class CsvRecorder:
         geschrieben wurde. Aufgefuellte Zeilen waeren dann inhaltlich falsch,
         nicht bloss unvollstaendig - und niemand wuerde es der Datei ansehen.
         """
-        if len(values) != len(self._columns):
+        if len(sample.values) != len(self._columns):
             raise WTError(
-                f"Sample {sample}: {len(values)} Messwerte passen nicht zu "
+                f"Sample {sample.number}: {len(sample.values)} Messwerte passen nicht zu "
                 f"{len(self._columns)} Wertspalten der Datei {self._path.name}. "
                 "Die Zeile wird nicht geschrieben, weil sie sonst gegen den "
                 "Spaltenkopf verrutschen wuerde."
             )
 
-        flags = [
-            f"{name}={value.status.value}"
-            for name, value in zip(self._columns, values)
-            if value.status is not ValueStatus.OK
-        ]
         row: list[str] = [
-            timestamp.isoformat(timespec="milliseconds"),
-            f"{elapsed_s:.3f}",
-            str(sample),
-            "" if condition is None else str(condition),
+            sample.timestamp.isoformat(timespec="milliseconds"),
+            f"{sample.elapsed_s:.3f}",
+            str(sample.number),
+            "" if sample.condition is None else str(sample.condition),
         ]
-        row.extend(self._cell(v) for v in values)
-        row.append(";".join(flags))
+        row.extend(self._cell(v) for v in sample.values)
+        # UEBERARBEITET (M4-1): die Flag-Liste entsteht jetzt im Datensatz und
+        # traegt dadurch auch dessen Kennzeichnung (M3-3/M3-4) - ohne dass die
+        # CSV dafuer eine weitere Spalte braucht.
+        row.append(";".join(sample.status_flags(self._columns)))
         self._writer.writerow(row)
         # Bei 1 Hz kostenlos; ein harter Abbruch kostet damit hoechstens
         # die letzte Zeile.
@@ -355,23 +453,24 @@ def run_measurement_loop(
          Context Manager kuenftig haelt, ist vor dem ersten Handgriff zu
          entscheiden; es verschiebt die Verantwortung fuer den Geraetezustand.
 
-    OFFEN (ROADMAP M4-1, sinnvollerweise VOR M3-1): der Rueckgabeweg. Heute
-    wandert eine Messzeile als fuenf getrennte Parameter direkt in
-    recorder.write_row(). Der von M3-1 geforderte Generator 'stream()' braucht
-    dagegen EIN Objekt je Zyklus, und M3-3/M3-4 haengen zusaetzlich eine
-    Kennzeichnung daran (Dublette erkannt, Zyklus fehlt). Ohne die
-    'Sample'-Dataclass aus M4-1 entsteht diese Signatur zweimal - erst als
-    Tupel, dann noch einmal richtig.
+    ERLEDIGT (ROADMAP M4-1): der Rueckgabeweg. Die Schleife baut je Zyklus ein
+    'Sample' und reicht genau das an die Ausgabe weiter. Der von M3-1
+    geforderte Generator 'stream()' hat damit bereits etwas zu liefern - aus
+    'recorder.write(datensatz)' wird ein 'yield datensatz', und die Erkennung
+    aus M3-3/M3-4 setzt nur noch 'Sample.mark'. Eine zweite Signatur entsteht
+    dabei nicht mehr.
     """
     stats = LoopStatistics()
     started_monotonic = time.monotonic()
     next_tick = started_monotonic
-    sample = 0
+    # UEBERARBEITET (M4-1): hiess 'sample'. Der Name ist an den Typ 'Sample'
+    # gegangen; der Zaehler heisst wie das Feld, das er fuellt.
+    number = 0
 
     with NumericHold(session, enabled=use_hold) as hold:
         try:
             while True:
-                if max_samples is not None and sample >= max_samples:
+                if max_samples is not None and number >= max_samples:
                     _log.info("Sampleanzahl erreicht (%d)", max_samples)
                     break
                 elapsed = time.monotonic() - started_monotonic
@@ -396,26 +495,33 @@ def run_measurement_loop(
                 if record_condition:
                     condition = int(session.query(":STATus:CONDition?"))
 
-                sample += 1
-                stats.samples = sample
+                number += 1
+                stats.samples = number
                 for value in values:
                     stats.status_counts[value.status] += 1
 
-                recorder.write_row(
-                    timestamp=timestamp,
-                    elapsed_s=cycle_start - started_monotonic,
-                    sample=sample,
-                    condition=condition,
-                    values=values,
+                # NEU (M4-1): der Zyklus wird zu EINEM Gegenstand
+                # zusammengefasst, bevor er die Schleife verlaesst. Ab hier
+                # kennt die Ausgabeseite nur noch diesen Typ - und der
+                # Generator 'stream()' aus M3-1 hat schon jetzt etwas zu
+                # liefern, ohne dass die Schleife noch einmal umgebaut wird.
+                recorder.write(
+                    Sample(
+                        timestamp=timestamp,
+                        elapsed_s=cycle_start - started_monotonic,
+                        number=number,
+                        condition=condition,
+                        values=values,
+                    )
                 )
 
                 cycle_time = time.monotonic() - cycle_start
                 stats.cycle_times.append(cycle_time)
 
-                if log_every > 0 and sample % log_every == 0:
+                if log_every > 0 and number % log_every == 0:
                     _log.info(
                         "Sample %d | Zyklus %.3f s | Condition %s | %s",
-                        sample,
+                        number,
                         cycle_time,
                         "-" if condition is None else condition,
                         _preview(table, values),
@@ -430,7 +536,7 @@ def run_measurement_loop(
                         _log.warning(
                             "Zyklus %d ueberschreitet das Intervall (%.3f s > %.3f s), "
                             "Overruns bisher: %d",
-                            sample,
+                            number,
                             cycle_time,
                             interval_s,
                             stats.overruns,
@@ -438,7 +544,7 @@ def run_measurement_loop(
                     next_tick = time.monotonic() + interval_s
 
         except KeyboardInterrupt:
-            _log.info("Abbruch durch Benutzer (Strg+C) nach %d Samples", sample)
+            _log.info("Abbruch durch Benutzer (Strg+C) nach %d Samples", number)
 
     return stats
 

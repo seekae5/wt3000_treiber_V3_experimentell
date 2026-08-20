@@ -165,7 +165,7 @@ def test_zu_wenige_werte_werden_gemeldet(caplog):
     Abbruch umgestellt wird. Die Entscheidung ist gefallen - und zwar
     differenziert:
 
-      * read_numeric_values() und CsvRecorder.write_row() brechen ab. Dort
+      * read_numeric_values() und CsvRecorder.write() brechen ab. Dort
         entstehen die Messdaten, dort verrutschen sonst die Spalten.
       * map_values() bleibt bei der Warnung. Es ist eine Bequemlichkeit fuer
         Anzeige und Diagnose, kein Datenpfad; ein fehlender Schluessel faellt

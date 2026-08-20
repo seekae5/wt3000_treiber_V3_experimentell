@@ -240,7 +240,7 @@ class ItemTable:
 
         UEBERARBEITET (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): Eine abweichende
         Anzahl bleibt hier bewusst eine WARNUNG - anders als in
-        read_numeric_values() und CsvRecorder.write_row(), die seit P-3 hart
+        read_numeric_values() und CsvRecorder.write(), die seit P-3 hart
         abbrechen.
 
         Die Trennung ist Absicht. Diese Methode ist eine Bequemlichkeit fuer
