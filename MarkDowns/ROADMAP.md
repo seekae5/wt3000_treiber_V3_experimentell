@@ -1,6 +1,6 @@
 # Roadmap — vom Stufenskript zur Treiberbibliothek
 
-**Stand:** 2026-08-20, `wt3000-scpi 0.3.0` (M1-2, M1-1 und M4-1 umgesetzt)
+**Stand:** 2026-08-20, `wt3000-scpi 0.3.0` (M1-2, M1-1, M4-1 und M4-2 umgesetzt)
 **Bezug:** [AENDERUNGEN_2026-08-18.md](AENDERUNGEN_2026-08-18.md) (Fehlerprüfung, Befunde B-01…B-15)
 
 **Zielbild.** Der fertige Treiber kann fünf Dinge:
@@ -29,8 +29,8 @@ Umsetzung gegen IM WT3001E-17EN und das Gerät abzugleichen.
 | **2. Gerätekonfiguration einstellen** | nichts. Weder Kommunikation, noch Averaging, Integration, Harmonische, Setup-Speicher | **5 %** |
 | **3. Mess-Konfiguration lesen/anpassen** | `InputConfig` deckt Verdrahtung, Bereiche, Auto-Range, Crest, Filter, Skalierung, Sync, Modus, Rate ab. Snapshot mit `capture/save/load/diff/restore`. `RangePlan` als deklarativer Sollzustand für Bereiche | **75 %** |
 | **4. Messung starten und stoppen** | blockierende Schleife `run_measurement_loop()`, Abbruch nur per Strg+C. Keine aufrufbare Start/Stop-Schnittstelle, keine Gerätesteuerung (Integrator, Einzelmessung) | **30 %** |
-| **5. Messdaten exportieren** | `CsvRecorder` schreibt eine feste CSV. `Sample` als Datensatz-Objekt steht seit M4-1. Noch kein Format-Wechsel möglich, keine Einheiten | **55 %** |
-| *Querschnitt* | Transport, Sitzung, Fehlerklassen, Item-Tabelle, Blockparser, 254 gerätefreie Tests, saubere Schichtung | **solide Basis** |
+| **5. Messdaten exportieren** | `Sample` als Datensatz-Objekt (M4-1), `SampleSink` als Vertrag mit vier Implementierungen — CSV, JSONL, Rückruf, Bündel (M4-2). Es fehlen Einheiten und die Bindung der Metadaten an die Daten | **80 %** |
+| *Querschnitt* | Transport, Sitzung, Fehlerklassen, Item-Tabelle, Blockparser, 282 gerätefreie Tests, saubere Schichtung | **solide Basis** |
 
 **Kurzfassung:** Die untere Hälfte (Transport, Protokoll, Zahlenformate, INPut-Gruppe)
 ist belastbar und getestet. Was fehlt, ist die obere Hälfte: eine benutzbare
@@ -406,22 +406,34 @@ Zyklen mit `NO_DATA` aufgefüllt werden oder ob `write()` einen Sonderweg bekomm
 
 Siehe [AENDERUNGEN_2026-08-20_M4-1.md](AENDERUNGEN_2026-08-20_M4-1.md).
 
-### M4-2 — Sink-Protokoll: CSV als eine Implementierung von mehreren `M`
+### M4-2 — Sink-Protokoll: CSV als eine Implementierung von mehreren `M` — **umgesetzt 2026-08-20**
 Die vom Zielbild geforderte Erweiterbarkeit.
 
-- `typing.Protocol` namens `SampleSink` mit `open(columns, metadata)`, `write(sample)`,
-  `close()` — bewusst klein gehalten
-- `CsvSink` als erste Implementierung, aus dem heutigen `CsvRecorder` hervorgegangen
-  (Trennzeichen, Statuskodierung, Sofort-Flush bleiben)
-- Weitere Senken danach ohne Eingriff in die Messschleife: `JsonlSink` (einfachster
-  Zusatz, gut für Streaming), `ParquetSink` (kompakt, für lange Reihen),
-  `CallbackSink` (Live-Anzeige), `MultiSink` (mehrere gleichzeitig)
-- Die Messschleife kennt nur `SampleSink`, nie ein konkretes Format
-- Zeilenlängenfehler abfangen: passt `len(sample.values)` nicht zu den Spalten, harter
-  Abbruch statt verschobener Spalten (Befund B-07). Bei Messdaten, die später
-  ausgewertet werden, ist eine stillschweigend verrutschte Spalte der teuerste Fehler
-- **Fertig, wenn:** ein zweites Format ohne eine Zeile Änderung an der Messschleife
-  ergänzt werden kann
+- [x] `typing.Protocol` namens `SampleSink` mit `open(columns, metadata)`, `write(sample)`,
+  `close()` — bewusst klein gehalten. Es wohnt in `wt3000_measure.py` neben `Sample`:
+  Datentyp und Vertrag sind ein Paar, und dadurch bleibt die Importrichtung eindeutig
+- [x] Neues Modul `wt3000_sinks.py` mit `CsvSink` als erster Implementierung, aus dem
+  bisherigen `CsvRecorder` hervorgegangen (Trennzeichen, Statuskodierung, Sofort-Flush
+  unverändert). Neu ist die Aufteilung Konstruktor (Format) / `open()` (Spalten und
+  Metadaten) — ohne sie kann formatunabhängiger Code keine Senke in Betrieb nehmen
+- [x] Weitere Senken, ohne einen Eingriff in die Messschleife: `JsonlSink`,
+  `CallbackSink`, `MultiSink`. **`ParquetSink` bewusst nicht** — das Paket hat heute
+  `dependencies = []`, und Parquet braucht pyarrow oder fastparquet. Ob der Treiber
+  eine erste Laufzeitabhängigkeit bekommt, ist eine eigene Entscheidung
+- [x] Die Messschleife kennt nur `SampleSink`, nie ein konkretes Format. Sie öffnet und
+  schließt die Senke selbst — die Spaltennamen stammen aus der Item-Tabelle, gegen die
+  auch gemessen wird, und ein `finally` ist der einzige Ort, an dem sich `close()` auch
+  bei Abbruch, Fehler und Strg+C zusagen lässt
+- [x] Zeilenlängenfehler abfangen (Befund B-07): die Regel liegt jetzt als
+  `require_matching_columns()` an **einer** Stelle und gilt für jede Senke, nicht nur
+  für die CSV
+- [x] **Fertig, wenn:** ein zweites Format ohne eine Zeile Änderung an der Messschleife
+  ergänzt werden kann — `tests/test_sinks.py`, 25 Testfälle; Suite gesamt 282 statt 254
+
+`MeasureControl.record()` nimmt jetzt eine beliebige Senke statt eines `csv_path`;
+`record_csv()` bleibt der Einzeiler für den häufigsten Fall.
+
+Siehe [AENDERUNGEN_2026-08-20_M4-2.md](AENDERUNGEN_2026-08-20_M4-2.md).
 
 ### M4-3 — Einheiten und Metadaten an die Daten binden `M`
 Die aktuelle CSV enthält Zahlen ohne Einheit. Der Treiber weiß nicht, dass `U` in Volt
@@ -545,8 +557,8 @@ M3-1 ──> M3-2
 1. **M1-2 + M1-1** — Transport-Protokoll und Fassade. Danach ist der Treiber zum
    ersten Mal von außen benutzbar, und alles Weitere lässt sich gerätefrei testen.
 2. **M0** komplett — ein Messtermin, der vier offene Annahmen zu Feststellungen macht.
-3. **M4-1** (erledigt) **+ M4-2** — Export entkoppeln. Kleiner Aufwand, und ab da ist jedes weitere
-   Format eine Datei statt eines Eingriffs.
+3. ~~**M4-1 + M4-2** — Export entkoppeln.~~ Erledigt: jedes weitere Format ist ab jetzt
+   eine Klasse in `wt3000_sinks.py` statt eines Eingriffs in die Messschleife.
 4. **M3-1** — Messung steuerbar machen. Ab hier ist das Zielbild in Grundzügen erfüllt.
 5. **M2-1** — die fehlenden Gerätegruppen, gruppenweise, in der genannten Reihenfolge.
 

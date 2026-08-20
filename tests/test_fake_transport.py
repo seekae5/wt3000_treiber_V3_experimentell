@@ -8,7 +8,7 @@
 # Lesevorgaenge, Fehlerqueue und das Abraeumen verspaeteter Antworten.
 #
 # Mit 'FakeTransport' laeuft die komplette Kette geraetefrei:
-#   FakeTransport -> WTSession -> ItemTable -> Messschleife -> CsvRecorder
+#   FakeTransport -> WTSession -> ItemTable -> Messschleife -> CsvSink
 # Das ist das 'Fertig, wenn' aus M1-2.
 # =============================================================================
 
@@ -30,11 +30,11 @@ from wt3000_scpi.wt3000_core import (
     WTSession,
 )
 from wt3000_scpi.wt3000_measure import (
-    CsvRecorder,
     Sample,  # NEU (M4-1)
     run_measurement_loop,
     write_metadata,
 )
+from wt3000_scpi.wt3000_sinks import CsvSink  # NEU (M4-2)
 from wt3000_scpi.wt3000_numeric import (
     FLOAT_NO_DATA,
     FLOAT_OVERRANGE,
@@ -338,18 +338,19 @@ def test_vollstaendige_messschleife_bis_in_die_csv(tmp_path):
     tabelle = ItemTable.read_from_device(sess)
     ziel = tmp_path / "messung.csv"
 
-    with CsvRecorder(ziel, [it.key for it in tabelle.items]) as recorder:
-        stats = run_measurement_loop(
-            session=sess,
-            table=tabelle,
-            recorder=recorder,
-            interval_s=0.0,  # kein sleep - der Test soll nicht warten
-            max_samples=zyklen,
-            max_duration_s=None,
-            use_hold=True,
-            record_condition=True,
-            log_every=0,
-        )
+    # UEBERARBEITET (M4-2): die Senke wird nur noch gebaut - oeffnen und
+    # schliessen erledigt die Messschleife.
+    stats = run_measurement_loop(
+        session=sess,
+        table=tabelle,
+        sink=CsvSink(ziel),
+        interval_s=0.0,  # kein sleep - der Test soll nicht warten
+        max_samples=zyklen,
+        max_duration_s=None,
+        use_hold=True,
+        record_condition=True,
+        log_every=0,
+    )
 
     assert stats.samples == zyklen
     assert stats.status_counts[ValueStatus.NO_DATA] == 1
@@ -392,7 +393,8 @@ def messwerte(anzahl: int) -> list[NumericValue]:
 def test_zu_wenige_werte_werden_nicht_geschrieben(tmp_path):
     """P-3: sonst rutscht 'status_flags' unter eine Messwertspalte."""
     ziel = tmp_path / "kurz.csv"
-    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+    with CsvSink(ziel) as recorder:
+        recorder.open(["U1", "I1", "P1"])
         with pytest.raises(WTError, match="Sample 1"):
             recorder.write(
                 Sample(
@@ -413,7 +415,8 @@ def test_zu_wenige_werte_werden_nicht_geschrieben(tmp_path):
 def test_zu_viele_werte_werden_nicht_geschrieben(tmp_path):
     """Der Gegenfall: sonst entstehen unbenannte Spalten hinter 'status_flags'."""
     ziel = tmp_path / "lang.csv"
-    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+    with CsvSink(ziel) as recorder:
+        recorder.open(["U1", "I1", "P1"])
         with pytest.raises(WTError, match="4 Messwerte"):
             recorder.write(
                 Sample(
@@ -431,7 +434,8 @@ def test_zu_viele_werte_werden_nicht_geschrieben(tmp_path):
 def test_passende_anzahl_wird_unveraendert_geschrieben(tmp_path):
     """Gegenprobe: die Pruefung darf den Regelfall nicht behindern."""
     ziel = tmp_path / "passend.csv"
-    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+    with CsvSink(ziel) as recorder:
+        recorder.open(["U1", "I1", "P1"])
         recorder.write(
             Sample(
                 timestamp=datetime.now(timezone.utc),
@@ -485,19 +489,18 @@ def test_messschleife_bricht_bei_verschobener_item_tabelle_ab(tmp_path):
     transport, sess = session(antworten)
     tabelle = ItemTable.read_from_device(sess)
 
-    with CsvRecorder(tmp_path / "abbruch.csv", [it.key for it in tabelle.items]) as recorder:
-        with pytest.raises(ProtocolError):
-            run_measurement_loop(
-                session=sess,
-                table=tabelle,
-                recorder=recorder,
-                interval_s=0.0,
-                max_samples=1,
-                max_duration_s=None,
-                use_hold=True,
-                record_condition=False,
-                log_every=0,
-            )
+    with pytest.raises(ProtocolError):
+        run_measurement_loop(
+            session=sess,
+            table=tabelle,
+            sink=CsvSink(tmp_path / "abbruch.csv"),
+            interval_s=0.0,
+            max_samples=1,
+            max_duration_s=None,
+            use_hold=True,
+            record_condition=False,
+            log_every=0,
+        )
 
     assert transport.written[-1] == ":NUMeric:HOLD OFF"
 
@@ -511,15 +514,33 @@ def test_hold_wird_auch_bei_einem_fehler_mitten_im_zyklus_abgeschaltet():
     tabelle = ItemTable.from_response("1;U,1")
 
     class Verweigerer:
-        # UEBERARBEITET (M4-1): heisst jetzt write() und nimmt ein Sample.
-        def write(self, *_):  # pragma: no cover - wird nie erreicht
+        """Eine Senke, die den ganzen Vertrag erfuellt und beim Schreiben knallt.
+
+        UEBERARBEITET (M4-1/M4-2): hiess write_row() und hatte sonst nichts.
+        Jetzt braucht sie open() und close(), weil die Messschleife beides
+        ruft - womit der Test nebenbei belegt, dass eine voellig fremde Klasse
+        als SampleSink taugt, ohne von irgendetwas zu erben.
+        """
+
+        def __init__(self):
+            self.geoeffnet = False
+            self.geschlossen = False
+
+        def open(self, columns, metadata=None):
+            self.geoeffnet = True
+
+        def write(self, sample):  # pragma: no cover - wird nie erreicht
             raise AssertionError("es darf keine Zeile entstehen")
 
+        def close(self):
+            self.geschlossen = True
+
+    senke = Verweigerer()
     with pytest.raises(TmctlError):
         run_measurement_loop(
             session=sess,
             table=tabelle,
-            recorder=Verweigerer(),
+            sink=senke,
             interval_s=0.0,
             max_samples=1,
             max_duration_s=None,
@@ -528,6 +549,9 @@ def test_hold_wird_auch_bei_einem_fehler_mitten_im_zyklus_abgeschaltet():
             log_every=0,
         )
     assert transport.written[-1] == ":NUMeric:HOLD OFF"
+    # NEU (M4-2): Die Schleife raeumt die Senke auch dann ab, wenn der Zyklus
+    # mitten im Lesen scheitert - sonst bliebe eine Datei offen zurueck.
+    assert senke.geoeffnet and senke.geschlossen
 
 
 def test_metadaten_sidecar_haelt_fehlgeschlagene_abfragen_fest(tmp_path):

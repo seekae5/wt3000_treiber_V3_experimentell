@@ -1,27 +1,33 @@
 # =============================================================================
 # Datei: wt3000_measure.py
-# Layer 3 (HOLD) + Layer 4 (Aufzeichnung) - wiederverwendbare Bausteine
+# Layer 3 (HOLD) + Layer 4 (Messschleife) - wiederverwendbare Bausteine
 # fuer die Messschleife.
+#
+# UEBERARBEITET (ROADMAP M4-2): Die CSV-Aufzeichnung ist hier ausgezogen und
+# liegt jetzt als 'CsvSink' in wt3000_sinks.py, neben den uebrigen
+# Ausgabeformaten. Geblieben sind die Messschleife, der Datensatz 'Sample'
+# (M4-1) und der Vertrag 'SampleSink', den die Schleife voraussetzt - Datentyp
+# und Vertrag gehoeren zusammen, und dadurch bleibt die Importrichtung
+# eindeutig: wt3000_sinks holt sich beide von hier, nie umgekehrt.
 #
 # Aendert nichts an wt3000_core.py, wt3000_numeric.py, wt3000_itemspec.py.
 # =============================================================================
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 # UEBERARBEITET (F-01, siehe AENDERUNGEN_2026-08-18.md): 'import math' entfernt -
 # das Modul wurde hier nie benutzt.
 import statistics
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from types import TracebackType
-from typing import TextIO
+from typing import Protocol, runtime_checkable
 
 # UEBERARBEITET (Punkt 4, src-Layout): paketrelative Importe.
 from .wt3000_core import WTError, WTSession
@@ -201,7 +207,7 @@ class Sample:
 
         Gemeinsame Grundlage jedes Ausgabeformats: der Aufrufer bekommt eine
         Liste wie ['mark=DUPLICATE', 'U2=OVERRANGE'] und entscheidet selbst,
-        wie er sie unterbringt. 'CsvRecorder' haengt sie in die Spalte
+        wie er sie unterbringt. 'CsvSink' haengt sie in die Spalte
         'status_flags'; ein kuenftiger Sink (M4-2) kann sie anders fuehren.
 
         Die Kennzeichnung des Zyklus steht bewusst VOR den Einzelwerten: bei
@@ -225,115 +231,61 @@ class Sample:
 
 
 # ---------------------------------------------------------------------------
-# Layer 4 - CSV-Aufzeichnung
+# NEU (ROADMAP M4-2): der Vertrag der Ausgabeseite
 # ---------------------------------------------------------------------------
 
 
-class CsvRecorder:
-    """Schreibt Messwerte zeilenweise in eine CSV-Datei.
+@runtime_checkable
+class SampleSink(Protocol):
+    """Wohin ein Messlauf seine Datensaetze schreibt.
 
-    Kodierung der Sonderfaelle so, dass gaengige Auswertewerkzeuge sie ohne
-    Nacharbeit richtig einlesen:
-        OK        -> Zahl
-        NO_DATA   -> leere Zelle  (pandas: NaN)
-        OVERRANGE -> 'INF'        (pandas: inf)
-    Zusaetzlich listet die Spalte 'status_flags' alle nicht-OK-Items im
-    Klartext, damit die Unterscheidung auch beim Sichten der Rohdatei erhalten
-    bleibt.
+    NEU (ROADMAP M4-2). Bewusst klein gehalten - drei Methoden, mehr braucht
+    kein Format. Die Messschleife kennt ab jetzt ausschliesslich diesen
+    Vertrag und nie ein konkretes Ausgabeformat; ein zweites Format ist eine
+    Datei in 'wt3000_sinks.py' und kein Eingriff in die Schleife.
+
+    Das Protocol wohnt hier und nicht bei den Implementierungen, weil es zu
+    'Sample' gehoert: Datentyp und Vertrag sind ein Paar. 'wt3000_sinks.py'
+    importiert beide von hier, die Importrichtung bleibt damit nach unten.
+
+    ARBEITSTEILUNG. Der Konstruktor einer Senke nimmt entgegen, was ihr Format
+    ausmacht - Dateipfad, Trennzeichen, Rueckruffunktion. 'open()' nimmt
+    entgegen, was der Messlauf mitbringt und was jede Senke gleichermassen
+    braucht: die Spaltennamen und die Metadaten. Erst dadurch kann Code, der
+    kein Format kennt, eine beliebige Senke in Betrieb nehmen.
+
+    LEBENSZYKLUS. 'run_measurement_loop()' ruft 'open()' einmal vor dem ersten
+    Zyklus und 'close()' in einem 'finally' - auch bei Abbruch, Fehler und
+    Strg+C. Ein Aufrufer, der die Schleife nicht benutzt, haelt sich an
+    dieselbe Reihenfolge. 'close()' muss mehrfachen Aufruf vertragen; ein
+    'write()' vor 'open()' ist ein Programmierfehler und gehoert mit einer
+    'WTError' quittiert, nicht mit einem AttributeError.
+
+    ZUSTAENDIG FUER DIE LAENGENPRUEFUNG ist die Senke, nicht die Schleife
+    (Befund B-07): nur sie kennt ihren Spaltenkopf. Passt 'len(sample.values)'
+    nicht dazu, ist das ein harter Abbruch - eine stillschweigend verrutschte
+    Spalte ist bei Messdaten, die Wochen spaeter ausgewertet werden, der
+    teuerste Fehler ueberhaupt. 'wt3000_sinks.require_matching_columns()'
+    fuehrt diese Regel an einer Stelle.
+
+    '@runtime_checkable' wie beim Transport-Protocol aus M1-2: damit laesst
+    sich 'issubclass(MeineSenke, SampleSink)' schreiben. Die Pruefung sieht
+    nur die Methodennamen, nicht ihre Signaturen - sie ersetzt keinen
+    Typpruefer, macht aber die Zusage 'jede fremde Klasse taugt hier' im
+    Test ueberhaupt formulierbar.
     """
 
-    def __init__(self, path: Path, column_names: list[str], delimiter: str = ",") -> None:
-        self._path = path
-        self._columns = column_names
-        self._handle: TextIO = path.open("w", newline="", encoding="utf-8")
-        self._writer = csv.writer(self._handle, delimiter=delimiter)
-        header = ["timestamp_iso", "elapsed_s", "sample", "condition"]
-        header.extend(column_names)
-        header.append("status_flags")
-        self._writer.writerow(header)
-        self._handle.flush()
-        _log.info("CSV geoeffnet: %s (%d Spalten)", path, len(header))
-
-    @staticmethod
-    def _cell(value: NumericValue) -> str:
-        """Einen Messwert in die Zellendarstellung wandeln."""
-        if value.status is ValueStatus.OK:
-            return repr(value.value)  # volle float-Genauigkeit, Dezimalpunkt
-        if value.status is ValueStatus.NO_DATA:
-            return ""
-        return "INF"
+    def open(self, columns: Sequence[str], metadata: Mapping[str, object]) -> None:
+        """Aufzeichnung beginnen. 'columns' sind die Item-Schluessel in Reihenfolge."""
+        ...
 
     def write(self, sample: Sample) -> None:
-        """Einen Datensatz als Zeile schreiben und sofort flushen.
-
-        UEBERARBEITET (ROADMAP M4-1): hiess bis hierher 'write_row()' und nahm
-        die fuenf Bestandteile einzeln entgegen. Jetzt nimmt die Methode das
-        'Sample' - damit ist der Vertrag zwischen Messschleife und Ausgabe auf
-        einen Typ eingedampft, und ein zweites Ausgabeformat (M4-2) muss keine
-        fuenfstellige Signatur nachbauen. Der neue Name ist zugleich der, den
-        das 'SampleSink'-Protocol aus M4-2 tragen wird.
-
-        Bewusst KEIN 'write_row'-Rest als Weiterleitung: die alte Signatur ist
-        genau das, was M4-1 abschafft. Eine Weiterleitung haette sie am Leben
-        gehalten, und der naechste Sink haette sich wieder an ihr orientiert.
-
-        UEBERARBEITET (P-3, siehe PLAN_BEFUNDE_2026-08-19.md): Die Zeile wird
-        gegen den Spaltenkopf geprueft, bevor irgendetwas geschrieben wird.
-        Passt die Anzahl nicht, bricht der Vorgang ab.
-
-        Bisher entstand die Zeile aus vier festen Feldern, 'len(values)'
-        Wertzellen und der Flag-Spalte - ohne jeden Abgleich mit dem Kopf. Bei
-        zu wenigen Werten rutschte 'status_flags' unter eine Messwertspalte,
-        bei zu vielen entstanden unbenannte Spalten. Beides sieht man der
-        fertigen Datei nicht an, weil jede Zeile fuer sich plausibel bleibt -
-        die Verschiebung zeigt sich erst im Vergleich mit dem Kopf, und dann
-        meist Wochen spaeter bei der Auswertung.
-
-        Abbruch statt Auffuellen ist Absicht: eine abweichende Werteanzahl
-        heisst, dass die Item-Tabelle nicht mehr die ist, gegen die der Kopf
-        geschrieben wurde. Aufgefuellte Zeilen waeren dann inhaltlich falsch,
-        nicht bloss unvollstaendig - und niemand wuerde es der Datei ansehen.
-        """
-        if len(sample.values) != len(self._columns):
-            raise WTError(
-                f"Sample {sample.number}: {len(sample.values)} Messwerte passen nicht zu "
-                f"{len(self._columns)} Wertspalten der Datei {self._path.name}. "
-                "Die Zeile wird nicht geschrieben, weil sie sonst gegen den "
-                "Spaltenkopf verrutschen wuerde."
-            )
-
-        row: list[str] = [
-            sample.timestamp.isoformat(timespec="milliseconds"),
-            f"{sample.elapsed_s:.3f}",
-            str(sample.number),
-            "" if sample.condition is None else str(sample.condition),
-        ]
-        row.extend(self._cell(v) for v in sample.values)
-        # UEBERARBEITET (M4-1): die Flag-Liste entsteht jetzt im Datensatz und
-        # traegt dadurch auch dessen Kennzeichnung (M3-3/M3-4) - ohne dass die
-        # CSV dafuer eine weitere Spalte braucht.
-        row.append(";".join(sample.status_flags(self._columns)))
-        self._writer.writerow(row)
-        # Bei 1 Hz kostenlos; ein harter Abbruch kostet damit hoechstens
-        # die letzte Zeile.
-        self._handle.flush()
+        """Einen Datensatz aufnehmen."""
+        ...
 
     def close(self) -> None:
-        """Datei schliessen. Mehrfachaufruf ist unschaedlich."""
-        if not self._handle.closed:
-            self._handle.close()
-            _log.info("CSV geschlossen: %s", self._path)
-
-    def __enter__(self) -> "CsvRecorder":
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self.close()
+        """Aufzeichnung beenden. Mehrfachaufruf ist unschaedlich."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -420,18 +372,31 @@ class LoopStatistics:
 def run_measurement_loop(
     session: WTSession,
     table: ItemTable,
-    recorder: CsvRecorder,
+    sink: SampleSink,
     interval_s: float,
     max_samples: int | None,
     max_duration_s: float | None,
     use_hold: bool,
     record_condition: bool,
     log_every: int,
+    metadata: Mapping[str, object] | None = None,
 ) -> LoopStatistics:
     """Messschleife mit driftfreier Taktung.
 
     Bricht sauber ab bei KeyboardInterrupt, erreichter Sampleanzahl oder
     abgelaufener Maximaldauer.
+
+    UEBERARBEITET (ROADMAP M4-2): Der Parameter hiess 'recorder' und war auf
+    'CsvRecorder' festgelegt. Jetzt ist es ein 'SampleSink' - die Schleife
+    kennt kein Ausgabeformat mehr. Ein zweites Format ist eine Klasse in
+    'wt3000_sinks.py' und keine Zeile hier.
+
+    Die Schleife OEFFNET und SCHLIESST die Senke selbst: die Spaltennamen
+    stehen in 'table', und ein 'finally' ist der einzige Ort, an dem sich
+    'close()' auch bei Abbruch, Fehler und Strg+C zusagen laesst. Der Aufrufer
+    baut die Senke also nur noch, statt ihren Lebenszyklus zu fuehren.
+    Nebenwirkung, die man kennen muss: nach einem Lauf ist die Senke
+    geschlossen; zwei Messreihen in eine Datei gehen so nicht.
 
     OFFEN (ROADMAP M3-1): Diese Funktion wird der Rumpf der Klasse
     'Measurement'. Drei Stellen sind dabei anzupassen und nicht bloss zu
@@ -467,6 +432,49 @@ def run_measurement_loop(
     # gegangen; der Zaehler heisst wie das Feld, das er fuellt.
     number = 0
 
+    # NEU (M4-2): Die Spaltennamen entstehen hier und nicht mehr beim Aufrufer -
+    # sie stehen in der Item-Tabelle, gegen die auch gemessen wird. Damit koennen
+    # Kopf und Daten gar nicht mehr aus verschiedenen Quellen stammen.
+    sink.open([item.key for item in table.items], metadata or {})
+    try:
+        return _loop_body(
+            session=session,
+            table=table,
+            sink=sink,
+            stats=stats,
+            started_monotonic=started_monotonic,
+            next_tick=next_tick,
+            number=number,
+            interval_s=interval_s,
+            max_samples=max_samples,
+            max_duration_s=max_duration_s,
+            use_hold=use_hold,
+            record_condition=record_condition,
+            log_every=log_every,
+        )
+    finally:
+        # Auch bei Fehler, Abbruch und Strg+C. Die Senke ist das Einzige, was
+        # ausserhalb des Prozesses weiterlebt.
+        sink.close()
+
+
+def _loop_body(
+    *,
+    session: WTSession,
+    table: ItemTable,
+    sink: SampleSink,
+    stats: LoopStatistics,
+    started_monotonic: float,
+    next_tick: float,
+    number: int,
+    interval_s: float,
+    max_samples: int | None,
+    max_duration_s: float | None,
+    use_hold: bool,
+    record_condition: bool,
+    log_every: int,
+) -> LoopStatistics:
+    """Die eigentliche Schleife. Getrennt, damit 'finally' oben lesbar bleibt."""
     with NumericHold(session, enabled=use_hold) as hold:
         try:
             while True:
@@ -505,7 +513,7 @@ def run_measurement_loop(
                 # kennt die Ausgabeseite nur noch diesen Typ - und der
                 # Generator 'stream()' aus M3-1 hat schon jetzt etwas zu
                 # liefern, ohne dass die Schleife noch einmal umgebaut wird.
-                recorder.write(
+                sink.write(
                     Sample(
                         timestamp=timestamp,
                         elapsed_s=cycle_start - started_monotonic,

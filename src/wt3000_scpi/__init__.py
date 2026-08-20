@@ -23,7 +23,13 @@
 #              wt3000_input     uebrige ':INPut'-Stellgroessen
 #   Layer 3    wt3000_itemspec  Ablauf um die Item-Tabelle
 #              wt3000_ranging   Ablauf um die Messbereiche
-#              wt3000_measure   Messschleife und CSV
+#   UEBERARBEITET (ROADMAP M4-2): die CSV ist aus wt3000_measure ausgezogen;
+#   geblieben sind dort Messschleife, Datensatz 'Sample' und der Vertrag
+#   'SampleSink'. Die Formate stehen als Fachmodul DANEBEN, nicht neben der
+#   Fassade: wt3000_sinks kennt kein SCPI-Kommando und keine Sitzung.
+#              wt3000_measure   Messschleife, Sample, SampleSink
+#              wt3000_sinks     Ausgabeformate: CsvSink, JsonlSink,
+#                               CallbackSink, MultiSink
 #   UEBERARBEITET (ROADMAP M1-1): Layer 4 hat einen zweiten Bewohner.
 #   Layer 4    wt3000_device    Fassade WT3000 - der Einstiegspunkt
 #              stage2..stage5b  ausfuehrbare Stufenskripte
@@ -79,9 +85,12 @@ from .wt3000_input import (
 # NEU (M4-1): der Datensatz. Er steht hier neben der Fassade und nicht nur im
 # Fachmodul, weil ab M4-2 jedes Ausgabeformat gegen ihn gebaut wird - wer einen
 # eigenen Sink schreibt, soll ihn aus der Paketwurzel holen koennen wie 'WT3000'.
-from .wt3000_measure import Sample, SampleMark
+from .wt3000_measure import Sample, SampleMark, SampleSink
 from .wt3000_numeric import NumericValue, ValueStatus
 from .wt3000_rangeio import ChangesNotAllowed, Quantity
+# NEU (M4-2): die Ausgabeformate. Wer eine Messreihe wegschreibt, waehlt hier -
+# und wer ein eigenes Format baut, findet in 'SampleSink' den ganzen Vertrag.
+from .wt3000_sinks import CallbackSink, CsvSink, JsonlSink, MultiSink, SinkNotOpen
 from .wt3000_transport import FakeTransport
 
 __all__ = [
@@ -118,6 +127,13 @@ __all__ = [
     # Datensatz (M4-1)
     "Sample",
     "SampleMark",
+    # Ausgabeformate (M4-2)
+    "SampleSink",
+    "CsvSink",
+    "JsonlSink",
+    "CallbackSink",
+    "MultiSink",
+    "SinkNotOpen",
 ]
 
 __version__ = "0.3.0"
@@ -135,6 +151,8 @@ MODULES: tuple[str, ...] = (
     "wt3000_itemspec",
     "wt3000_ranging",
     "wt3000_measure",
+    # NEU (M4-2): die Ausgabeformate - Fachmodul neben wt3000_measure.
+    "wt3000_sinks",
     # NEU (M1-1): die Fassade.
     "wt3000_device",
 )

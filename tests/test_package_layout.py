@@ -41,11 +41,29 @@ LAYERS: dict[str, set[str]] = {
         "wt3000_numeric",
         "wt3000_itemspec",
     },
+    # NEU (ROADMAP M4-2): die Ausgabeformate. Sie stehen auf derselben Stufe
+    # wie 'wt3000_measure' und NICHT neben der Fassade - dieser Test hat die
+    # Einordnung erzwungen, und zwar zu Recht: 'wt3000_sinks' kennt kein
+    # einziges SCPI-Kommando und keine Sitzung, es setzt nur den Vertrag
+    # 'SampleSink' um. Ein Fachmodul also, kein Einstiegspunkt.
+    #
+    # Bewusst NICHT erlaubt ist der Rueckweg: 'wt3000_measure' darf
+    # 'wt3000_sinks' nicht importieren. Genau daran haengt das 'Fertig, wenn'
+    # von M4-2 - die Messschleife kommt mit dem Protocol aus und kennt kein
+    # konkretes Format. Stuende hier ein Eintrag, waere die Entkopplung
+    # wieder dahin.
+    "wt3000_sinks": {"wt3000_core", "wt3000_numeric", "wt3000_measure"},
     # NEU (ROADMAP M1-1): die Fassade ist Layer 4 und darf deshalb aus allen
     # Schichten darunter importieren - aber aus keinem Stufenskript und aus
     # keinem zweiten Layer-4-Modul. Genau das haelt dieser Eintrag fest: die
     # Fassade buendelt die Fachmodule, sie ergaenzt sie nicht um eigene
     # Geraetekenntnis.
+    #
+    # UEBERARBEITET (M4-2): 'wt3000_sinks' ist dazugekommen. Die Fassade
+    # braucht es fuer 'MeasureControl.record_csv()' - den einen Aufruf, der
+    # dem Anwender den haeufigsten Fall abnimmt. Das ist Buendeln von
+    # Fachmodulen und damit genau die Aufgabe der Fassade; 'record()' selbst
+    # bleibt formatfrei und nimmt jede beliebige Senke.
     "wt3000_device": {
         "wt3000_transport",
         "wt3000_core",
@@ -56,6 +74,7 @@ LAYERS: dict[str, set[str]] = {
         "wt3000_itemspec",
         "wt3000_ranging",
         "wt3000_measure",
+        "wt3000_sinks",
     },
 }
 

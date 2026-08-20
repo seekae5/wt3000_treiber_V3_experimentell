@@ -63,13 +63,14 @@ from .wt3000_itemspec import (
     verify_item_table,
 )
 from .wt3000_measure import (
-    CsvRecorder,
     LoopStatistics,
     NumericHold,
+    SampleSink,
     build_standard_profile,
     run_measurement_loop,
     write_metadata,
 )
+from .wt3000_sinks import CsvSink
 from .wt3000_numeric import ItemTable, NumericItem, NumericValue, read_numeric_values
 from .wt3000_rangeio import RangeAccess, sigma_members_from_units
 from .wt3000_ranging import RangeBackup, RangePlan, RangeReport, applied_ranges
@@ -432,6 +433,69 @@ class MeasureControl:
 
     def record(
         self,
+        sink: SampleSink,
+        table: ItemTable,
+        interval_s: float = 1.0,
+        max_samples: int | None = None,
+        max_duration_s: float | None = None,
+        use_hold: bool = True,
+        record_condition: bool = True,
+        log_every: int = 0,
+        metadata_path: Path | None = None,
+        parameters: dict | None = None,
+    ) -> LoopStatistics:
+        """Messschleife in eine beliebige Senke schreiben.
+
+        UEBERARBEITET (ROADMAP M4-2): nahm bis hierher einen 'csv_path' und
+        legte die CSV selbst an - damit war die Fassade auf ein Ausgabeformat
+        festgelegt, obwohl das Zielbild ausdruecklich 'CSV, mit Platz fuer
+        weitere Formate' verlangt. Jetzt nimmt sie die Senke entgegen:
+
+            wt.measure.record(CsvSink(pfad), tabelle)
+            wt.measure.record(JsonlSink(pfad), tabelle)
+            wt.measure.record(MultiSink(CsvSink(a), CallbackSink(anzeigen)), tabelle)
+
+        Fuer den haeufigsten Fall gibt es 'record_csv()' - ein Aufruf, der die
+        Senke selbst baut.
+
+        Die Senke wird von der Messschleife geoeffnet und geschlossen; hier
+        wird sie nur weitergereicht. Blockiert bis zum Erreichen eines Limits
+        oder bis Strg+C. Ohne Limit laeuft sie unbegrenzt weiter - das ist
+        Absicht, aber beim Einbau in fremden Code selten gewollt.
+        """
+        if use_hold and self._read_only:
+            _log.warning("Nur-Lesen-Sitzung: Messschleife laeuft ohne HOLD")
+            use_hold = False
+
+        # Dieselben Angaben gehen an den Sidecar UND an die Senke: ein Format
+        # wie JSONL legt sie mit in die Datei, die CSV laesst sie liegen.
+        lauf_parameter: dict[str, object] = {
+            "sample_interval_s": interval_s,
+            "max_samples": max_samples,
+            "max_duration_s": max_duration_s,
+            "use_hold": use_hold,
+            "record_condition": record_condition,
+            **(parameters or {}),
+        }
+
+        if metadata_path is not None:
+            write_metadata(metadata_path, self._session, table, parameters=lauf_parameter)
+
+        return run_measurement_loop(
+            session=self._session,
+            table=table,
+            sink=sink,
+            interval_s=interval_s,
+            max_samples=max_samples,
+            max_duration_s=max_duration_s,
+            use_hold=use_hold,
+            record_condition=record_condition,
+            log_every=log_every,
+            metadata=lauf_parameter,
+        )
+
+    def record_csv(
+        self,
         csv_path: Path,
         table: ItemTable,
         interval_s: float = 1.0,
@@ -444,45 +508,25 @@ class MeasureControl:
         metadata_path: Path | None = None,
         parameters: dict | None = None,
     ) -> LoopStatistics:
-        """Messschleife in eine CSV schreiben.
+        """Messschleife in eine CSV schreiben - der haeufigste Fall.
 
-        Blockiert bis zum Erreichen eines Limits oder bis Strg+C. Ohne Limit
-        laeuft sie unbegrenzt weiter - das ist Absicht, aber beim Einbau in
-        fremden Code selten gewollt.
+        NEU (ROADMAP M4-2): duenne Weiterleitung an 'record()' mit einer
+        fertig gebauten 'CsvSink'. Sie besteht, damit der Normalfall ein
+        Aufruf bleibt und nicht zwei werden - wer nur eine CSV will, soll sich
+        mit dem Sink-Begriff gar nicht befassen muessen.
         """
-        if use_hold and self._read_only:
-            _log.warning("Nur-Lesen-Sitzung: Messschleife laeuft ohne HOLD")
-            use_hold = False
-
-        if metadata_path is not None:
-            write_metadata(
-                metadata_path,
-                self._session,
-                table,
-                parameters={
-                    "sample_interval_s": interval_s,
-                    "max_samples": max_samples,
-                    "max_duration_s": max_duration_s,
-                    "use_hold": use_hold,
-                    "record_condition": record_condition,
-                    "csv_file": csv_path.name,
-                    **(parameters or {}),
-                },
-            )
-
-        column_names = [item.key for item in table.items]
-        with CsvRecorder(csv_path, column_names, delimiter=delimiter) as recorder:
-            return run_measurement_loop(
-                session=self._session,
-                table=table,
-                recorder=recorder,
-                interval_s=interval_s,
-                max_samples=max_samples,
-                max_duration_s=max_duration_s,
-                use_hold=use_hold,
-                record_condition=record_condition,
-                log_every=log_every,
-            )
+        return self.record(
+            CsvSink(csv_path, delimiter=delimiter),
+            table,
+            interval_s=interval_s,
+            max_samples=max_samples,
+            max_duration_s=max_duration_s,
+            use_hold=use_hold,
+            record_condition=record_condition,
+            log_every=log_every,
+            metadata_path=metadata_path,
+            parameters={"csv_file": csv_path.name, **(parameters or {})},
+        )
 
 
 # ---------------------------------------------------------------------------

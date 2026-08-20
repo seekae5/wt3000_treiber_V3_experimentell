@@ -29,11 +29,13 @@ from .wt3000_itemspec import (
     verify_item_table,
 )
 from .wt3000_measure import (
-    CsvRecorder,
     build_standard_profile,
     run_measurement_loop,
     write_metadata,
 )
+# UEBERARBEITET (ROADMAP M4-2): CsvRecorder heisst CsvSink und wohnt jetzt bei
+# den uebrigen Ausgabeformaten.
+from .wt3000_sinks import CsvSink
 from .wt3000_numeric import ItemTable, NumericItem
 
 # ---------------------------------------------------------------------------
@@ -177,20 +179,22 @@ def main() -> int:
                 )
 
                 # 4) Messschleife.
-                column_names = [item.key for item in target.items]
+                # UEBERARBEITET (ROADMAP M4-2): Spaltenkopf und Lebenszyklus der
+                # Senke liegen jetzt in der Schleife - hier wird sie nur gebaut.
+                # Ein anderes Ausgabeformat waere an dieser Stelle ein anderer
+                # Klassenname und sonst nichts.
                 log.info("Start der Messung. Abbruch jederzeit mit Strg+C.")
-                with CsvRecorder(csv_file, column_names, delimiter=CSV_DELIMITER) as recorder:
-                    stats = run_measurement_loop(
-                        session=session,
-                        table=target,
-                        recorder=recorder,
-                        interval_s=SAMPLE_INTERVAL_S,
-                        max_samples=MAX_SAMPLES,
-                        max_duration_s=MAX_DURATION_S,
-                        use_hold=USE_HOLD,
-                        record_condition=RECORD_CONDITION,
-                        log_every=LOG_EVERY,
-                    )
+                stats = run_measurement_loop(
+                    session=session,
+                    table=target,
+                    sink=CsvSink(csv_file, delimiter=CSV_DELIMITER),
+                    interval_s=SAMPLE_INTERVAL_S,
+                    max_samples=MAX_SAMPLES,
+                    max_duration_s=MAX_DURATION_S,
+                    use_hold=USE_HOLD,
+                    record_condition=RECORD_CONDITION,
+                    log_every=LOG_EVERY,
+                )
                 stats.log_summary(SAMPLE_INTERVAL_S)
 
                 session.assert_no_error("Messschleife")

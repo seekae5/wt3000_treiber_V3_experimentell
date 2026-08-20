@@ -23,7 +23,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from wt3000_scpi.wt3000_measure import CsvRecorder, Sample, SampleMark
+from wt3000_scpi.wt3000_measure import Sample, SampleMark
+from wt3000_scpi.wt3000_sinks import CsvSink  # NEU (M4-2)
 from wt3000_scpi.wt3000_numeric import NumericValue, ValueStatus
 
 
@@ -134,7 +135,8 @@ def test_kuerzere_spaltenliste_laesst_ueberzaehlige_werte_unerwaehnt():
 
 def test_csv_zeile_entsteht_vollstaendig_aus_dem_sample(tmp_path):
     ziel = tmp_path / "eine_zeile.csv"
-    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+    with CsvSink(ziel) as recorder:
+        recorder.open(["U1", "I1", "P1"])
         recorder.write(datensatz(number=3, condition=16))
 
     kopf, zeile = list(csv.reader(ziel.open(encoding="utf-8")))
@@ -158,7 +160,8 @@ def test_csv_zeile_entsteht_vollstaendig_aus_dem_sample(tmp_path):
 def test_kennzeichnung_landet_in_der_flag_spalte_ohne_neue_spalte(tmp_path):
     """M3-3/M3-4 brauchen dadurch kein geaendertes Dateiformat."""
     ziel = tmp_path / "dublette.csv"
-    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+    with CsvSink(ziel) as recorder:
+        recorder.open(["U1", "I1", "P1"])
         recorder.write(datensatz(mark=SampleMark.DUPLICATE))
 
     kopf, zeile = list(csv.reader(ziel.open(encoding="utf-8")))
@@ -168,7 +171,8 @@ def test_kennzeichnung_landet_in_der_flag_spalte_ohne_neue_spalte(tmp_path):
 
 def test_fehlendes_condition_bleibt_eine_leere_zelle(tmp_path):
     ziel = tmp_path / "ohne_condition.csv"
-    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+    with CsvSink(ziel) as recorder:
+        recorder.open(["U1", "I1", "P1"])
         recorder.write(datensatz(condition=None))
 
     _, zeile = list(csv.reader(ziel.open(encoding="utf-8")))
@@ -178,7 +182,8 @@ def test_fehlendes_condition_bleibt_eine_leere_zelle(tmp_path):
 def test_laengenpruefung_aus_p3_gilt_weiter(tmp_path):
     """Der Umbau auf Sample darf die Absicherung aus P-3 nicht verlieren."""
     ziel = tmp_path / "verrutscht.csv"
-    with CsvRecorder(ziel, ["U1", "I1", "P1"]) as recorder:
+    with CsvSink(ziel) as recorder:
+        recorder.open(["U1", "I1", "P1"])
         with pytest.raises(Exception, match="Sample 4"):
             recorder.write(datensatz(number=4, values=[wert(1.0)]))
 
