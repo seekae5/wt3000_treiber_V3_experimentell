@@ -364,4 +364,4 @@ def sigma_members_from_units(units) -> dict[str, tuple[int, ...]]:
             continue
         mapping[token] = tuple(int(e) for e in unit.elements)
     _log.info("Wiring-Units uebernommen: %s", mapping or "keine")
-    return mapping
+    return mapping

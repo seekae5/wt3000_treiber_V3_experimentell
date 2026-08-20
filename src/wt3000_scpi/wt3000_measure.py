@@ -448,4 +448,4 @@ def _preview(table: ItemTable, values: list[NumericValue], count: int = 3) -> st
     parts = [
         f"{item.key}={value}" for item, value in list(zip(table.items, values))[:count]
     ]
-    return " ".join(parts)
+    return " ".join(parts)

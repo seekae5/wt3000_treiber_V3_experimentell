@@ -1,0 +1,48 @@
+# =============================================================================
+# Datei: .gitattributes
+# Zeilenenden verbindlich fuehren.
+#
+# Hintergrund. Bis hierher hatte das Projekt keine .gitattributes, dafuer aber
+# 'core.autocrlf=true' auf dem Entwicklungsrechner. Daraus entstand ein
+# gemischter Bestand: 26 der 30 Python-Dateien lagen als LF im Repository, vier
+# als CRLF -
+#     src/wt3000_scpi/wt3000_common.py
+#     src/wt3000_scpi/wt3000_measure.py
+#     src/wt3000_scpi/wt3000_numeric.py
+#     src/wt3000_scpi/wt3000_rangeio.py
+#
+# Wer eine dieser vier mit einem Werkzeug bearbeitet, das Zeilenenden
+# vereinheitlicht - Pythons read_text()/write_text() tut das ueber universal
+# newlines -, erzeugt einen Diff ueber die GANZE Datei statt ueber die
+# geaenderten Zeilen. Bei wt3000_measure.py waren das einmal 858 geaenderte
+# Zeilen fuer eine 44-zeilige Kommentarergaenzung. Die eigentliche Aenderung
+# ist darin nicht mehr auffindbar, eine Durchsicht des Diffs faellt damit
+# praktisch aus - und das ausgerechnet an der Datei, die als naechstes fuer
+# ROADMAP M3-1 umgebaut wird.
+# =============================================================================
+
+# Grundregel: Git erkennt Textdateien selbst; sie stehen dann sowohl im
+# Repository als auch im Arbeitsverzeichnis ausnahmslos mit LF.
+#
+# 'eol=lf' ist der Teil, der 'core.autocrlf' des jeweiligen Rechners aussticht.
+# Ohne ihn haengt der Inhalt des Arbeitsverzeichnisses weiter an einer lokalen
+# Git-Einstellung, die in keiner Datei des Projekts steht - genau daran hing
+# der gemischte Bestand. Getrackte Dateien, die zwingend CRLF braeuchten, gibt
+# es nicht: kein .bat, kein .cmd, kein .ps1.
+* text=auto eol=lf
+
+# Dieselbe Regel noch einmal ausdruecklich je Endung. Fachlich redundant, aber
+# sie nimmt der Heuristik die Entscheidung ab und macht am Dateikopf lesbar,
+# welche Typen das Projekt ueberhaupt fuehrt.
+*.py    text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+*.json  text eol=lf
+*.xml   text eol=lf
+
+# Binaerdateien werden nie umgeschrieben. 'tools/tmctl64.dll' enthaelt zufaellig
+# CR-LF-Bytefolgen; ohne diese Zeile entschiede allein die Heuristik (Suche
+# nach NUL-Bytes) darueber, ob die DLL unveraendert bleibt. Eine einmal
+# normalisierte DLL waere unbrauchbar und der Schaden faellt erst beim
+# Verbindungsaufbau auf.
+*.dll   binary

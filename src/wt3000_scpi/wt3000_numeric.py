@@ -333,4 +333,4 @@ def read_numeric_values(
                 "verlaessliche Spaltenzuordnung.)"
             )
         _log.warning("Erwartet: %d Werte, erhalten: %d", expected_count, len(values))
-    return values
+    return values

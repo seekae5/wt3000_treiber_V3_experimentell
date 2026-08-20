@@ -223,4 +223,4 @@ def setup_logging(log_file: Path) -> None:
     root.setLevel(logging.INFO)
     root.handlers.clear()
     root.addHandler(console)
-    root.addHandler(file_handler)
+    root.addHandler(file_handler)
