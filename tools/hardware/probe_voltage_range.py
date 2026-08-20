@@ -17,10 +17,24 @@
 # stage5b_range_probe.py als Vorbild). Dies ist der einfache erste Schritt:
 # EIN Wert, EIN Element, mit Sicherung und Rueckstellung.
 #
-# Sicherheitsmassnahmen wie in stage5b_range_probe.py:
+# Sicherheitsmassnahmen (UEBERARBEITET, Schritt 2 aus
+# MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-02):
 #   - Element 4 (Direkteingang, unkritisch fuer diese Probe)
-#   - Ausgangswert wird vor dem Schreiben gelesen und danach zurueckgesetzt
-#   - Fehlerqueue wird am Ende geprueft
+#   - Ausgangswert wird vor dem Schreiben gelesen und im 'finally' wieder
+#     gesetzt - also auch bei einem Timeout beim Ruecklesen und bei Strg+C.
+#     Bis Schritt 2 stand die Rueckstellung ungeschuetzt hinter dem Ruecklesen;
+#     die Zusage galt nur auf dem glatten Weg.
+#   - Fehlerqueue wird geprueft, NACHDEM zurueckgestellt wurde
+#   - Scheitert die Rueckstellung selbst, nennt die Fehlermeldung den Sollwert,
+#     der am Geraet von Hand einzustellen ist
+#
+# Das Urteil faellt maschinell: der zurueckgelesene Wert wird mit dem gesendeten
+# verglichen, und main() liefert 1, wenn das Geraet ihn nicht uebernommen hat.
+# Vorher gingen beide Werte nur ins Protokoll und der Rueckgabewert war immer 0 -
+# der Beleg fuer M0-1 musste von Hand aus der Datei gelesen werden.
+#
+# REMOTE steht als Modulkonstante USE_REMOTE im Skript, nicht in der
+# Konfiguration. Begruendung an der Konstante selbst.
 # =============================================================================
 
 from __future__ import annotations
@@ -31,7 +45,12 @@ from pathlib import Path
 
 from wt3000_scpi.wt3000_common import output_dir, setup_logging
 from wt3000_scpi.wt3000_core import TmctlTransport, WTConfig, WTError, WTSession
-from wt3000_scpi.wt3000_rangeio import Quantity, RangeAccess
+from wt3000_scpi.wt3000_rangeio import (
+    Quantity,
+    RangeAccess,
+    RangeValue,
+    ranges_match,
+)
 
 # ---------------------------------------------------------------------------
 # Laufparameter
@@ -39,6 +58,22 @@ from wt3000_scpi.wt3000_rangeio import Quantity, RangeAccess
 
 ELEMENT: int = 4
 TEST_VALUE: float = 1000.0
+
+#: Fernsteuerung waehrend der Probe. Bewusst NICHT aus 'config.use_remote':
+#
+# M0-1 fragt nach der SYNTAX, M0-3 nach der NOTWENDIGKEIT von REMOTE. Haengt
+# dieses Skript an der Konfiguration, entscheidet eine Umgebungsvariable oder
+# eine Zeile in 'wt3000.json' ueber den Versuchsaufbau - ohne im Protokoll
+# aufzutauchen. Ein fehlgeschlagener Rueckleseversuch waere dann keiner der
+# beiden Ursachen mehr zuzuordnen, und genau diese Trennung ist der Zweck des
+# Skripts.
+#
+# 'True' und nicht 'False', weil REMOTE ON der Zustand ist, in dem ein
+# Schreibzugriff am sichersten angenommen wird. Schlaegt der Rueckleseabgleich
+# TROTZDEM fehl, liegt es an der Syntax - das ist die Aussage, die gebraucht
+# wird. Den Gegenversuch ohne REMOTE fuehrt stage5b_range_probe.py, das genau
+# dafuer gebaut ist.
+USE_REMOTE: bool = True
 
 # UEBERARBEITET: Ablage an der Projektwurzel statt an 'Path.cwd()'.
 # Bis hierher hing das am Arbeitsverzeichnis - ein Start aus einem
@@ -60,29 +95,100 @@ def main() -> int:
     log = logging.getLogger("wt3000.probe_voltage_range")
     log.info("Protokolldatei: %s", log_file)
 
+    exit_code = 0
+
     try:
         with TmctlTransport(config) as transport:
             session = WTSession(transport, config, read_only=False)
             access = RangeAccess(session, allow_changes=True)
 
-            original = access.get_range(Quantity.VOLTAGE, ELEMENT)
-            log.info("Ausgangswert Element %d: %s", ELEMENT, original.describe(Quantity.VOLTAGE))
+            if USE_REMOTE:
+                session.enable_remote()
+            log.info(
+                "Fernsteuerung: %s (Modulkonstante, nicht aus der Konfiguration)",
+                "ON" if USE_REMOTE else "OFF",
+            )
 
-            command = access.set_range(Quantity.VOLTAGE, ELEMENT, TEST_VALUE)
-            log.info("Gesendet: %s", command)
+            try:
+                original = access.get_range(Quantity.VOLTAGE, ELEMENT)
+                log.info(
+                    "Ausgangswert Element %d: %s", ELEMENT, original.describe(Quantity.VOLTAGE)
+                )
 
-            readback = access.get_range(Quantity.VOLTAGE, ELEMENT)
-            log.info("Zurueckgelesen: %s", readback.describe(Quantity.VOLTAGE))
+                # UEBERARBEITET (Schritt 2 aus MarkDowns/PLAN_AUFRUFKETTE.md,
+                # Befund A-02): try/finally um den Schreibteil. Vorher lagen
+                # zwischen dem Schreiben des Testwerts und der Rueckstellung ein
+                # Query und zwei Protokollausgaben, ohne jede Absicherung - jede
+                # Ausnahme dort, und ein Strg+C an jeder Stelle, liess TEST_VALUE
+                # auf einem eingemessenen Geraet stehen. Der Dateikopf sagte die
+                # Rueckstellung trotzdem zu.
+                try:
+                    command = access.set_range(Quantity.VOLTAGE, ELEMENT, TEST_VALUE)
+                    log.info("Gesendet: %s", command)
 
-            # Ausgangswert wiederherstellen, bevor die Fehlerqueue geprueft wird.
-            access.set_range(Quantity.VOLTAGE, ELEMENT, original.value, sensor=original.sensor)
-            session.assert_no_error("Schreibprobe rangeio")
+                    readback = access.get_range(Quantity.VOLTAGE, ELEMENT)
+                    log.info("Zurueckgelesen: %s", readback.describe(Quantity.VOLTAGE))
+
+                    # UEBERARBEITET (Befund A-02): das Urteil faellt hier, nicht
+                    # beim Lesen des Protokolls. Vorher gingen beide Werte nur ins
+                    # Log und main() lieferte auch dann 0, wenn das Geraet den Wert
+                    # gar nicht uebernommen hatte - der Beleg fuer M0-1 musste von
+                    # Hand aus der Datei gezogen werden.
+                    #
+                    # ranges_match() und nicht values_match(): es vergleicht die
+                    # Eingangsart mit. 10 A direkt und 10 V am Sensoreingang sind
+                    # nicht derselbe Zustand, auch bei gleichem Zahlenwert.
+                    erwartet = RangeValue(TEST_VALUE, sensor=False)
+                    if ranges_match(erwartet, readback):
+                        log.info(
+                            "BELEG M0-1: Wert uebernommen - '%s' ist gueltige Syntax",
+                            command,
+                        )
+                    else:
+                        log.error(
+                            "BELEG M0-1: gesendet %s, zurueckgelesen %s - NICHT uebernommen",
+                            erwartet.describe(Quantity.VOLTAGE),
+                            readback.describe(Quantity.VOLTAGE),
+                        )
+                        exit_code = 1
+
+                finally:
+                    # Auch bei Strg+C zwischen Schreiben und Ruecklesen. Ein
+                    # Fehlschlag HIER wird protokolliert und nicht geworfen: sonst
+                    # verdraengte er die urspruengliche Ausnahme. Dieselbe Haltung
+                    # wie in Stufe 3 und 4 bei restore_item_table(). Die Meldung
+                    # nennt den Wert, den jemand am Geraet von Hand zuruecksetzen
+                    # muss - das ist die wichtigste Zeile, wenn es schiefgeht.
+                    try:
+                        zurueck = access.set_range(
+                            Quantity.VOLTAGE, ELEMENT, original.value, sensor=original.sensor
+                        )
+                        log.info("Ausgangswert wiederhergestellt: %s", zurueck)
+                    except WTError as error:
+                        log.error(
+                            "RUECKSTELLUNG FEHLGESCHLAGEN: %s - Element %d steht "
+                            "moeglicherweise noch auf dem Testwert. Sollwert: %s",
+                            error,
+                            ELEMENT,
+                            original.describe(Quantity.VOLTAGE),
+                        )
+                        exit_code = 1
+
+                # Die Fehlerqueue deckt den GANZEN Vorgang ab, Rueckstellung
+                # eingeschlossen - deshalb steht sie hinter dem finally und nicht
+                # darin. Bricht der Nutzteil ab, wird sie nicht mehr erreicht: dann
+                # traegt die Ausnahme selbst die Aussage, und ein zusaetzlicher
+                # DeviceError wuerde sie nur verdecken.
+                session.assert_no_error("Schreibprobe rangeio")
+
+            finally:
+                session.disable_remote()
 
     except WTError as error:
         log.error("Abbruch: %s", error)
         return 1
 
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

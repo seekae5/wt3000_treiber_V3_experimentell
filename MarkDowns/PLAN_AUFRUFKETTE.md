@@ -323,7 +323,38 @@ Verhaltensänderung an der Programmoberfläche und gehört zu Schritt 8.
 
 ---
 
-### Schritt 2 — Die Geräteskripte belastbar machen `S` · Befund A-02
+### Schritt 2 — Die Geräteskripte belastbar machen `S` · Befund A-02 — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** Alle vier Teile (2a–2d) eingebaut. Nachweis:
+> [tests/test_probe_range_tools.py](../tests/test_probe_range_tools.py), 21 Prüfsätze —
+> **alle 21 waren vor der Reparatur rot.** Anders als bei Schritt 1 gibt es hier keine
+> reinen Absicherungen: die Skripte waren bis dahin vollständig ungeprüft.
+>
+> `TEST_VALUE = 0.75` ist damit auch empirisch erledigt: der Prüfsatz
+> `test_teststrom_ist_eine_gueltige_bereichsstufe` meldete *„fehlt in 4 von 4
+> Bereichstabellen"* — genau die Mehrdeutigkeit, die §1.3 aus dem Kommentar hergeleitet
+> hatte. Der Wert steht wieder auf `0.5`, und die Regel ist jetzt maschinell festgehalten
+> statt nur kommentiert.
+>
+> Zwei Dinge kamen beim Bauen dazu, die oben nicht stehen:
+>
+> * **Die Fehlerqueue-Reihenfolge ist ein eigener Prüfsatz geworden.** `assert_no_error()`
+>   muss *nach* dem letzten `:RANGe`-Schreibzugriff kommen, sonst deckt sie die
+>   Rückstellung nicht mit ab — und die Rückstellung ist der Schreibzugriff, bei dem ein
+>   Fehler am meisten wiegt. Am Syntaxbaum nachgeprüft: Rückstellung endet Zeile 175/200,
+>   `assert_no_error` steht auf 182/207.
+> * **Der Ladeweg für `tools/hardware/`.** Die Skripte werden über
+>   `spec_from_file_location` geladen, nicht über einen `sys.path`-Eintrag. Ein solcher
+>   Eintrag wäre genau der Weg, über den eine automatische Import-Ergänzung der
+>   Entwicklungsumgebung einmal `from tests.conftest import …` in `probe_current_range.py`
+>   geschrieben hat (siehe dessen Dateikopf). Diese Hilfsfunktion gehört mit Schritt 0c
+>   nach `conftest.py`.
+>
+> Die Dateiköpfe beider Skripte sind nachgezogen — sie versprachen eine Rückstellung, die
+> nur auf dem glatten Weg galt.
+>
+> Geprüft: 337 Tests grün (vorher 316), `ruff` sauber, `mypy` sauber (auch auf
+> `tools/hardware/`, das die Standardkonfiguration nicht erfasst).
 
 **Orte:** [probe_voltage_range.py](../tools/hardware/probe_voltage_range.py),
 [probe_current_range.py](../tools/hardware/probe_current_range.py)
