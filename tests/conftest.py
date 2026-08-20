@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -48,7 +49,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 # set_timeout/close, nicht am Konstruktor. Ebenso das monkeypatch auf
 # wt3000_device.TmctlTransport in test_device_facade.py: dort wird der Name
 # ersetzt, der echte Konstruktor also gar nicht erreicht.
-from wt3000_scpi.wt3000_transport import FakeTransport, TmctlTransport  # noqa: E402
+from wt3000_scpi.wt3000_transport import (  # noqa: E402
+    FakeTransport,
+    TmctlTransport,
+    float_block,
+)
 
 
 def _kein_geraetezugriff(self, *args, **kwargs):
@@ -307,3 +312,165 @@ def stufenlauf(monkeypatch, tmp_path):
         if handler not in wurzel.handlers:
             wurzel.addHandler(handler)
     wurzel.setLevel(level_vorher)
+
+
+# ---------------------------------------------------------------------------
+# Geraetemodell fuer vollstaendige main()-Laeufe
+# NEU (Schritt 7 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-13)
+# ---------------------------------------------------------------------------
+#
+# Beides stand in test_device_facade.py und wird ab Schritt 7 auch von den
+# Stufenskripten gebraucht: Stufe 2, 3 und 4 lesen die Item-Tabelle, schreiben
+# sie (3 und 4) und lesen anschliessend Messwerte dagegen. Ein FakeTransport
+# mit fester Antworttabelle traegt das nicht - er wuesste nach einem
+# ':NUMeric:NORMal:ITEM5 U,2' nichts davon.
+#
+# 'ItemTableTransport' fuehrt die Tabelle deshalb als ZUSTAND mit. Damit wird
+# die Frage pruefbar, um die es bei Stufe 3 und 4 eigentlich geht: steht die
+# Item-Tabelle nach main() wieder so da wie vorher?
+
+IDN = "YOKOGAWA,WT3000,C1B234567,F2.11"
+
+_ITEM_NODE = re.compile(r"^:NUMERIC:NORMAL:ITEM(\d+)$")
+
+
+def base_responses(
+    wiring: str = "V3A3,P1W2",
+    modules: str = "30,30,30,30",
+    header: str = "0",
+    numeric_format: str = "FLOat",
+) -> dict:
+    """Antworten, die die Fassade beim Verbinden und Pruefen braucht."""
+    table = dict(range_responses())
+    table.update(
+        {
+            "*IDN": IDN,
+            ":INPUT:WIRING": wiring,
+            ":INPUT:MODULE": modules,
+            ":COMMUNICATE:HEADER": header,
+            ":NUMERIC:FORMAT": numeric_format,
+            ":STATUS:CONDITION": "0",
+            ":NUMERIC:HOLD": "0",
+            # UEBERARBEITET (Schritt 7): ab hier auch das, was die
+            # Stufenskripte brauchen und die Fassade nicht abfragt -
+            # ':RATE?' (Stufe 2 und 4) und die elf Metadaten-Abfragen
+            # von write_metadata() (Stufe 4).
+            ":RATE": "1.000E+00",
+            ":COMMUNICATE": "0,0,0",
+            ":INPUT": "ELEMENT1,1000V;ELEMENT2,1000V;ELEMENT3,1000V;ELEMENT4,1000V",
+            ":INPUT:SCALING": "0,0,0,0",
+            ":INPUT:FILTER": "OFF,OFF,OFF,OFF",
+            ":INPUT:CFACTOR": "3",
+            ":MEASURE": "NORMAL",
+        }
+    )
+    return table
+
+
+class ItemTableTransport(FakeTransport):
+    """FakeTransport, der Schreibzugriffe auf die Item-Tabelle uebernimmt.
+
+    Nur so weit ausgebaut, wie die Item-Tabelle es verlangt: ITEM<n> und
+    NUMber werden uebernommen, alles andere bleibt Tabellenantwort.
+    """
+
+    MAX_INDEX = 64
+
+    def __init__(self, items: dict[int, str], number: int, **kwargs) -> None:
+        self.items = dict(items)
+        self.number = number
+
+        responses = base_responses()
+        responses[":NUMERIC:NORMAL"] = lambda _cmd: self._table_response()
+        for index in range(1, self.MAX_INDEX + 1):
+            responses[f":NUMERIC:NORMAL:ITEM{index}"] = self._item_responder(index)
+        responses[":NUMERIC:NORMAL:VALUE"] = lambda _cmd: self._value_block()
+        responses.update(kwargs.pop("responses", {}))
+        super().__init__(responses, **kwargs)
+
+    # -- Geraetemodell ------------------------------------------------------
+
+    def _item_responder(self, index: int):
+        return lambda _cmd: self.items.get(index, "NONE")
+
+    def _table_response(self) -> str:
+        parts = [str(self.number)]
+        parts += [self.items.get(i, "NONE") for i in range(1, self.number + 1)]
+        return ";".join(parts)
+
+    def _value_block(self) -> bytes:
+        """Ein Messwert je Item - aufsteigend, damit die Zuordnung pruefbar ist."""
+        return float_block(float(i) for i in range(1, self.number + 1))
+
+    def write(self, command: str) -> None:
+        super().write(command)
+        node, _, argument = command.strip().partition(" ")
+        key = node.upper()
+        match = _ITEM_NODE.match(key)
+        if match:
+            self.items[int(match.group(1))] = argument.strip()
+        elif key == ":NUMERIC:NORMAL:NUMBER":
+            self.number = int(argument)
+
+
+# ---------------------------------------------------------------------------
+# Antworttabelle fuer die Eingangskonfiguration (Stufe 5)
+# NEU (Schritt 7 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-13)
+# ---------------------------------------------------------------------------
+
+
+def input_responses(elemente: tuple[int, ...] = (1, 2, 3, 4)) -> dict[str, str]:
+    """Alles, was 'InputSnapshot.capture()' abfragt - 17 Knoten je Element.
+
+    Die Knotennamen werden aus den Konstanten von 'wt3000_input' GEBAUT und
+    nicht abgeschrieben. Das ist der Unterschied zwischen einer Tabelle, die
+    mitwandert, und einer, die beim naechsten Umbau still veraltet: benennt
+    jemand '_BASE_SCAL_SFACTOR' um oder aendert den Pfad, faellt das hier auf,
+    statt sich in einem KeyError aus FakeTransport zu verstecken.
+
+    Abgebildet ist der vorliegende Aufbau: Elemente 1-3 an externen
+    Stromsensoren (10 V), Element 4 direkt (5 A) - dieselbe Konstellation wie
+    in range_responses().
+    """
+    from wt3000_scpi import wt3000_input as wi
+
+    tabelle: dict[str, str] = {
+        ":INPUT": "ELEMENT1,1000V;ELEMENT2,1000V;ELEMENT3,1000V;ELEMENT4,1000V",
+        ":INPUT:CFACTOR": "3",
+        ":INPUT:WIRING": "V3A3,P1W2",
+        ":INPUT:INDEPENDENT": "1",
+        ":INPUT:MODULE": ",".join("30" if e in elemente else "0" for e in (1, 2, 3, 4)),
+        ":RATE": "1.000E+00",
+    }
+
+    je_element = {
+        wi._BASE_VOLT_RANGE: "1.000E+03",
+        wi._BASE_VOLT_AUTO: "0",
+        wi._BASE_VOLT_MODE: "RMS",
+        wi._BASE_CURR_AUTO: "0",
+        wi._BASE_CURR_MODE: "RMS",
+        wi._BASE_SRATIO: "1.000E+00",
+        wi._BASE_FILTER_LINE: "OFF",
+        wi._BASE_FILTER_FREQ: "0",
+        wi._BASE_SCAL_STATE: "0",
+        wi._BASE_SCAL_VT: "1.000E+00",
+        wi._BASE_SCAL_CT: "1.000E+00",
+        wi._BASE_SCAL_SFACTOR: "1.000E+00",
+        wi._BASE_SYNC: "EXTERNAL",
+    }
+
+    for element in elemente:
+        for basis, wert in je_element.items():
+            tabelle[wi._node(basis, element).upper()] = wert
+        # Elemente 1-3 haengen am Sensoreingang, Element 4 direkt.
+        tabelle[wi._node(wi._BASE_CURR_RANGE, element).upper()] = (
+            "EXTERNAL,10.00E+00" if element in SENSOR_ELEMENTS else "5.00E+00"
+        )
+
+    return tabelle
+
+
+@pytest.fixture
+def eingangsantworten() -> dict[str, str]:
+    """Antworttabelle des vorliegenden Aufbaus fuer Stufe 5."""
+    return input_responses()

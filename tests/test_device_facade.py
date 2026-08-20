@@ -17,10 +17,11 @@
 
 from __future__ import annotations
 
-import re
 
 import pytest
-from conftest import range_responses  # UEBERARBEITET: keine zweite Antworttabelle
+# UEBERARBEITET (Schritt 7): 'base_responses' und 'ItemTableTransport' liegen
+# jetzt in conftest.py - die Stufenskripte brauchen dasselbe Geraetemodell.
+from conftest import ItemTableTransport, base_responses
 
 from wt3000_scpi import WT3000, WTConfig, WTError
 from wt3000_scpi import wt3000_device  # NEU (P-1): fuer monkeypatch auf TmctlTransport
@@ -28,80 +29,7 @@ from wt3000_scpi.wt3000_core import ReadOnlyViolation, TmctlError  # TmctlError:
 from wt3000_scpi.wt3000_input import ConfigLocked
 from wt3000_scpi.wt3000_itemspec import ItemSpec
 from wt3000_scpi.wt3000_numeric import ValueStatus
-from wt3000_scpi.wt3000_transport import FakeTransport, float_block
-
-IDN = "YOKOGAWA,WT3000,C1B234567,F2.11"
-
-_ITEM_NODE = re.compile(r"^:NUMERIC:NORMAL:ITEM(\d+)$")
-
-
-def base_responses(
-    wiring: str = "V3A3,P1W2",
-    modules: str = "30,30,30,30",
-    header: str = "0",
-    numeric_format: str = "FLOat",
-) -> dict:
-    """Antworten, die die Fassade beim Verbinden und Pruefen braucht."""
-    table = dict(range_responses())
-    table.update(
-        {
-            "*IDN": IDN,
-            ":INPUT:WIRING": wiring,
-            ":INPUT:MODULE": modules,
-            ":COMMUNICATE:HEADER": header,
-            ":NUMERIC:FORMAT": numeric_format,
-            ":STATUS:CONDITION": "0",
-            ":NUMERIC:HOLD": "0",
-        }
-    )
-    return table
-
-
-class ItemTableTransport(FakeTransport):
-    """FakeTransport, der Schreibzugriffe auf die Item-Tabelle uebernimmt.
-
-    Nur so weit ausgebaut, wie die Item-Tabelle es verlangt: ITEM<n> und
-    NUMber werden uebernommen, alles andere bleibt Tabellenantwort.
-    """
-
-    MAX_INDEX = 64
-
-    def __init__(self, items: dict[int, str], number: int, **kwargs) -> None:
-        self.items = dict(items)
-        self.number = number
-
-        responses = base_responses()
-        responses[":NUMERIC:NORMAL"] = lambda _cmd: self._table_response()
-        for index in range(1, self.MAX_INDEX + 1):
-            responses[f":NUMERIC:NORMAL:ITEM{index}"] = self._item_responder(index)
-        responses[":NUMERIC:NORMAL:VALUE"] = lambda _cmd: self._value_block()
-        responses.update(kwargs.pop("responses", {}))
-        super().__init__(responses, **kwargs)
-
-    # -- Geraetemodell ------------------------------------------------------
-
-    def _item_responder(self, index: int):
-        return lambda _cmd: self.items.get(index, "NONE")
-
-    def _table_response(self) -> str:
-        parts = [str(self.number)]
-        parts += [self.items.get(i, "NONE") for i in range(1, self.number + 1)]
-        return ";".join(parts)
-
-    def _value_block(self) -> bytes:
-        """Ein Messwert je Item - aufsteigend, damit die Zuordnung pruefbar ist."""
-        return float_block(float(i) for i in range(1, self.number + 1))
-
-    def write(self, command: str) -> None:
-        super().write(command)
-        node, _, argument = command.strip().partition(" ")
-        key = node.upper()
-        match = _ITEM_NODE.match(key)
-        if match:
-            self.items[int(match.group(1))] = argument.strip()
-        elif key == ":NUMERIC:NORMAL:NUMBER":
-            self.number = int(argument)
-
+from wt3000_scpi.wt3000_transport import FakeTransport
 
 def open_facade(transport: FakeTransport, **kwargs) -> WT3000:
     """Fassade auf einem Fake-Transport, ohne Fernsteuerung."""

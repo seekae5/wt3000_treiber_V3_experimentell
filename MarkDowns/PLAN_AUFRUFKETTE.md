@@ -926,7 +926,49 @@ heute dafür anbietet.
 
 ---
 
-### Schritt 7 — Die vier ungeprüften Stufen durchspielen `S` · Befund A-13 (Rest)
+### Schritt 7 — Die vier ungeprüften Stufen durchspielen `S` · Befund A-13 (Rest) — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** Alle fünf Stufen und beide Geräteskripte laufen jetzt
+> vollständig gegen `FakeTransport` durch. 472 Tests grün (vorher 453), `ruff` und `mypy`
+> sauber. Nachweis:
+> [tests/test_stage_durchlauf.py](../tests/test_stage_durchlauf.py), 19 Prüfsätze.
+>
+> **Der aufwendigste Teil war nicht der Blockdatenpfad, sondern der Zustand.** Ein
+> `FakeTransport` mit fester Antworttabelle trägt Stufe 3 und 4 nicht: er wüsste nach
+> einem `:NUMeric:NORMal:ITEM5 U,2` nichts davon, und damit ließe sich die Frage, um die
+> es eigentlich geht — *steht die Item-Tabelle nach `main()` wieder wie vorher?* — gar
+> nicht stellen. `ItemTableTransport` aus `test_device_facade.py` führt die Tabelle als
+> Zustand mit und liefert Messwertblöcke; es ist mit `base_responses` nach `conftest.py`
+> gewandert. Der Blockdatenpfad kam damit gratis mit.
+>
+> **`input_responses()` baut die Knotennamen aus den Konstanten von `wt3000_input`**, statt
+> sie abzuschreiben — 17 Knoten je Element. Das ist der Unterschied zwischen einer
+> Tabelle, die mitwandert, und einer, die beim nächsten Umbau still veraltet.
+>
+> **Drei Dinge, die der Durchlauf sichtbar gemacht hat:**
+>
+> * **A-14 ist reproduzierbar.** Stufe 2 baut im äußeren `finally` eine zweite Verbindung
+>   auf. Gegen einen bereits geschlossenen Transport endet das in *„TmcSend
+>   fehlgeschlagen … Transport ist geschlossen"* — die Vorrichtung nimmt `closed` deshalb
+>   je Konstruktion zurück, weil am Gerät jeder `TmctlTransport(config)` eine neue
+>   Verbindung ist. Der Aufwand ist damit belegt, nicht nur behauptet.
+> * **Zwei Backup-Formate für dieselbe Sache.** Stufe 2 nutzt `ItemTable.save()` und
+>   schreibt `to_dict()` direkt; Stufe 3 und 4 gehen über `save_backup_bundle()` und legen
+>   einen `table`-Rahmen darum. Das ist S-06 und gehört zu ROADMAP M2-4 („Ein gemeinsames
+>   Backup") — hier nur festgehalten, nicht geändert.
+> * **`base_responses` musste um sechs Knoten wachsen**, die die Fassade nie abfragt:
+>   `:RATE?` und die elf Metadaten-Abfragen von `write_metadata()`. Dass sie fehlten, ist
+>   der handfeste Beleg dafür, dass die Stufenskripte andere Wege gehen als die Fassade.
+>
+> **Der letzte Prüfsatz aus der Tabelle unten — „der Kopf sagt die Wahrheit" — ist
+> eingelöst:** `test_stufe2_beruehrt_die_item_tabelle_nicht` und
+> `test_stufe5_schreibt_kein_einziges_kommando` sind die maschinellen Fassungen der
+> Zusagen aus den Dateiköpfen. Beide sind heute grün und schreiben den Zustand fest,
+> *bevor* Schritt 9 Stufe 2 auf `read_only=True` umstellt.
+>
+> Gegengeprüft durch Mutation: `restore_item_table()` zu einem No-op gemacht → drei
+> Prüfsätze werden rot, darunter `test_stufe4_gibt_null_zurueck` mit *„NUMber ist 31,
+> erwartet 3"*. Mutation zurückgenommen.
 
 Nach Schritt 0 trägt die Vorrichtung für alle fünf Stufen und beide Werkzeuge. Was fehlt,
 sind die Antworttabellen und die Prüfsätze. Je Skript mindestens:
