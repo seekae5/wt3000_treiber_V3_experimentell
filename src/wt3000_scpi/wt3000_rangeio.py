@@ -166,7 +166,19 @@ class RangeAccess:
     {'SIGMA': (1, 2, 3), 'SIGMB': (4,)} fuer die Verdrahtung V3A3,P1W2.
     Ohne diese Angabe werden SIGMA-/SIGMB-Scopes abgelehnt statt geraten -
     eine falsch geratene Zuordnung waere genau der Fehler, den die strikte
-    Scope-Normalisierung verhindern soll.
+    Scope-Normalisierung verhindern soll. Seit Schritt 4 gilt das nicht mehr
+    nur fuer den Weg ueber wt3000_ranging, sondern fuer jeden Aufruf an diesem
+    Objekt (siehe _geprueftes_suffix).
+
+    ZU BEACHTEN - 'elements' ist eine ANNAHME, keine Tatsache:
+    DEFAULT_ELEMENTS = (1, 2, 3, 4) beschreibt den vorliegenden Aufbau, nicht
+    das Geraet am anderen Ende. Wer die Voreinstellung stehen laesst, prueft
+    also gegen eine Annahme - stage5b und beide Skripte unter tools/hardware/
+    tun genau das, obwohl stage5b ein Feld weiter 'access.get_module()'
+    protokolliert. Das ist Befund S-01; aufgeloest wird es mit ROADMAP M1-3,
+    wenn 'DeviceInfo' die bestueckte Elementliste liefert. Die Pruefung in
+    _geprueftes_suffix() folgt dann ohne weitere Aenderung der richtigen
+    Liste - sie fragt dieses Objekt, nicht die Konstante.
     """
 
     def __init__(
@@ -227,6 +239,48 @@ class RangeAccess:
             )
         return members
 
+    def _geprueftes_suffix(self, scope: str | int) -> str:
+        """Scope pruefen und in die SCPI-Pfadendung wandeln.
+
+        NEU (Schritt 4 aus MarkDowns/PLAN_AUFRUFKETTE.md, Befund A-03).
+
+        Bis hierher gingen 'get_range()', 'set_range()', 'get_auto()' und
+        'set_auto()' direkt ueber 'scope_suffix()' - das jede Zahl in
+        ':ELEMent<n>' uebersetzt, ohne zu fragen, ob es das Element gibt.
+        'expand_scope()' wurde ausschliesslich aus 'wt3000_ranging' heraus
+        aufgerufen, also eine Schicht hoeher.
+
+        Das war der Kernbefund der Analyse in Reinform: die Schutzregel lag
+        eine Schicht ueber dem Knoten, den sie schuetzt. Layer 4 darf Layer 2
+        direkt aufrufen - und tut es (beide Skripte unter tools/hardware/,
+        jeder Anwender, der 'wt.ranges' aus der Fassade zieht). Wer an Layer 3
+        vorbeigreift, verlor damit die Regel, ohne dass irgendetwas davon
+        Notiz nahm: am Geraet faellt ein Kommando an ein nicht bestuecktes
+        Element als Eintrag in der Fehlerqueue auf - also erst bei
+        'assert_no_error()', oder gar nicht.
+
+        Der Rueckgabewert von 'expand_scope()' wird hier nicht gebraucht; es
+        geht allein um die Pruefung. Sie kostet nichts und gehoert zu dem
+        Objekt, das die Elementliste besitzt.
+
+        BEABSICHTIGTE VERHALTENSAENDERUNG: Ein SIGMA-Scope auf einem
+        RangeAccess ohne 'sigma_members' wird ab jetzt abgelehnt statt
+        stillschweigend gesendet.
+
+        Fuer den geplanten Weg ueber wt3000_ranging aendert das NICHTS, und
+        zwar nachgemessen: 'apply_plan()' ruft als erstes 'plan.validate()',
+        und das loest jeden Scope ueber 'expand_scope()' auf (wt3000_ranging,
+        RangePlan.validate). Derselbe WTError fiel dort also schon vorher, und
+        ebenfalls bevor ein einziges Kommando hinausging.
+
+        Betroffen ist allein, wer Layer 2 DIREKT benutzt und den RangePlan
+        umgeht - also genau die Gruppe, um die es in A-03 geht: die Skripte
+        unter tools/hardware/ und jeder Anwender, der 'wt.ranges' aus der
+        Fassade zieht. Fuer sie gab es diese Pruefung bisher ueberhaupt nicht.
+        """
+        self.expand_scope(scope)
+        return scope_suffix(scope)
+
     # -- Lesen --------------------------------------------------------------
 
     # UEBERARBEITET (RANGEIO-2): Rueckgabe ist jetzt RangeValue statt float,
@@ -237,12 +291,14 @@ class RangeAccess:
         Antwortet das Element mit 'EXTERNAL,<Volt>', wird der Wert als
         Sensorbereich gekennzeichnet zurueckgegeben.
         """
-        response = self._session.query(f"{quantity.value}:RANGe:ELEMent{element}?")
+        suffix = self._geprueftes_suffix(element)
+        response = self._session.query(f"{quantity.value}:RANGe{suffix}?")
         return parse_range_value(response, f"{quantity.range_label} Element {element}")
 
     def get_auto(self, quantity: Quantity, element: int) -> bool:
         """Autorange-Zustand eines Elements lesen."""
-        response = self._session.query(f"{quantity.value}:AUTO:ELEMent{element}?")
+        suffix = self._geprueftes_suffix(element)
+        response = self._session.query(f"{quantity.value}:AUTO{suffix}?")
         return parse_boolean(response, f"Autorange {quantity.label} Element {element}")
 
     def get_ranges(self, quantity: Quantity) -> dict[int, RangeValue]:  # UEBERARBEITET (RANGEIO-2)
@@ -315,13 +371,16 @@ class RangeAccess:
                 ":INPut:VOLTage:RANGe kennt kein 'EXTernal'"
             )
         parameter = f"EXTernal,{format_nrf(value)}" if sensor else format_nrf(value)
-        command = f"{quantity.value}:RANGe{scope_suffix(scope)} {parameter}"
+        command = f"{quantity.value}:RANGe{self._geprueftes_suffix(scope)} {parameter}"
         self._write(command)
         return command
 
     def set_auto(self, quantity: Quantity, scope: str | int, state: bool) -> str:
         """Autorange ein- oder ausschalten. Rueckgabe: das gesendete Kommando."""
-        command = f"{quantity.value}:AUTO{scope_suffix(scope)} {'ON' if state else 'OFF'}"
+        command = (
+            f"{quantity.value}:AUTO{self._geprueftes_suffix(scope)} "
+            f"{'ON' if state else 'OFF'}"
+        )
         self._write(command)
         return command
 

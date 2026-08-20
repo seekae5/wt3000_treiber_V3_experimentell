@@ -617,7 +617,40 @@ Parameter der Fabrik aus 0c vorzusehen.
 
 ---
 
-### Schritt 4 — `RangeAccess` prüft seine Elemente `S` · Befund A-03
+### Schritt 4 — `RangeAccess` prüft seine Elemente `S` · Befund A-03 — **umgesetzt 2026-08-20**
+
+> **Stand nach der Umsetzung.** Nachweis:
+> [tests/test_range_scope_guard.py](../tests/test_range_scope_guard.py), 35 Prüfsätze —
+> 27 waren vorher rot. 416 Tests grün (vorher 381), `ruff` und `mypy` sauber.
+>
+> **Über den Plan hinaus: es sind vier Methoden, nicht zwei.** Die Analyse nennt nur
+> `set_range()`/`get_range()`. Beim Nachsehen haben `get_auto()` und `set_auto()` exakt
+> dieselbe Lücke — auch sie gehen direkt über `scope_suffix(scope)`. Ein
+> Autorange-Kommando an ein nicht bestücktes Element ist derselbe Fehler. Alle vier
+> laufen jetzt über ein gemeinsames `_geprueftes_suffix()`; `scope_suffix` wird in
+> `wt3000_rangeio` nur noch dort aufgerufen, es gibt also genau ein Tor.
+>
+> **Korrektur meiner Begründung unten.** Der Absatz zur Nebenwirkung stimmt im Ergebnis,
+> aber nicht in der Herleitung — und das ließ sich messen statt herleiten:
+>
+> * Die Funktion heißt `apply_plan()`, nicht `apply_range_plan()`.
+> * Sie ruft **als erstes** `plan.validate(access)`, und `RangePlan.validate()` löst jeden
+>   Scope bereits über `expand_scope()` auf. Der `WTError` fiel dort also **vor** dem
+>   Schreibzugriff, nicht danach.
+>
+> Gegen den alten Baum (`git archive HEAD`) gemessen: `apply_plan()` mit einem
+> SIGMA-Scope ohne `sigma_members` liefert vorher wie nachher denselben `WTError`, und in
+> beiden Fällen ist `written == []`. Für den geplanten Weg ändert sich also **gar nichts**.
+> Betroffen ist allein, wer Layer 2 direkt benutzt und den `RangePlan` umgeht — genau die
+> Gruppe, um die es in A-03 geht. Das ist die bessere Begründung: die Umstellung
+> verschiebt keinen Fehler, sie schließt eine Lücke, die es nur am direkten Weg gab.
+> Der Beleg steht als `test_geplanter_weg_verhaelt_sich_unveraendert()` in der Suite,
+> nicht nur als Kommentar.
+>
+> **`DEFAULT_ELEMENTS` ist als Annahme gekennzeichnet**, wie vorgesehen — mit dem Zusatz,
+> dass die neue Prüfung *dieses Objekt* fragt und nicht die Konstante. Sobald `DeviceInfo`
+> die Elementliste liefert (S-01/M1-3), wirkt sie ohne weitere Änderung richtig; ein
+> Prüfsatz mit `elements=(1, 2, 3)` hält das fest.
 
 **Ort:** [wt3000_rangeio.py:232](../src/wt3000_scpi/wt3000_rangeio.py#L232) (`get_range`),
 [:285](../src/wt3000_scpi/wt3000_rangeio.py#L285) (`set_range`)
