@@ -83,6 +83,30 @@ class WTSession:
     Nimmt ein 'Transport'-Protocol entgegen, keine konkrete Klasse. Damit
     laeuft dieselbe Sitzung geraetefrei auf 'FakeTransport' - und spaeter auf
     einem Socket- oder VISA-Transport, ohne dass hier eine Zeile faellt.
+
+    OFFEN (ROADMAP M3-1) - VOR der Umsetzung zu entscheiden, nicht waehrend:
+    Diese Klasse ist NICHT threadsicher, und im ganzen Paket gibt es kein
+    einziges Lock. write() und query() sind ein Schreib-Lese-Paar auf EINER
+    Verbindung; laufen zwei davon nebenlaeufig, bekommt der eine Aufrufer die
+    Antwort des anderen - und zwar stillschweigend, weil beide Antworten fuer
+    sich plausibel aussehen. Sobald M3-1 die Messschleife in einen
+    Hintergrund-Thread legt, ist genau das der Normalfall: der Thread liest im
+    Takt, waehrend der Aufrufer weiterhin wt.input, wt.ranges oder
+    log_condition() benutzen darf. Zwei gangbare Wege:
+
+      (a) ein threading.RLock hier, gelegt um write/query/query_raw/
+          query_block. Er muss query_block() GANZ umschliessen, denn
+          _assemble_block() liest ueber self._transport.read() nach - sonst
+          liest der zweite Aufrufer mitten in einen fremden Block hinein.
+          Ebenfalls betroffen: set_timeout() in drain_after_failure(), das
+          gemeinsamen Transportzustand veraendert.
+      (b) die ausdrueckliche Zusage 'waehrend einer laufenden Measurement
+          gehoert die Sitzung dem Thread' - dann muss die Fassade jeden
+          anderen Zugriff ablehnen, solange is_running gilt.
+
+    Weg (a) ist die kleinere Aenderung, Weg (b) die ehrlichere: ein Lock macht
+    einen Fremdzugriff mitten in der Messreihe zwar sicher, aber nicht
+    sinnvoll - er verschiebt den naechsten Takt.
     """
 
     def __init__(self, transport: Transport, config: WTConfig, read_only: bool = False) -> None:

@@ -378,6 +378,24 @@ class MeasureControl:
     Strg+C oder ein gesetztes Limit ab. Sie hier anzubinden macht sie
     erreichbar, nicht steuerbar - das ist M3-1 (Aufzeichnung als Objekt mit
     start()/stop()) und ausdruecklich nicht Teil von M1-1.
+
+    OFFEN (ROADMAP M3-2) - Zustaendigkeit ungeklaert: Die Geraetesteuerung
+    (':INTEGrate:STARt / :STOP / :RESet') hat hier noch keinen Platz, und wohin
+    sie gehoert, entscheidet die ROADMAP nicht. ':INTEGrate' steht dort
+    zweimal: unter M2-1 als Gruppe des neuen Moduls 'wt3000_deviceconfig.py'
+    (Layer 2/3, mit Rueckleseprobe und Gruppensperre wie wt3000_input) und
+    unter M3-2 als Ablauf. Wird M3-2 vorab als eigenes Modul gebaut, entsteht
+    genau die vierte Kopie derselben Parser, die M2-5 verhindern soll.
+    Vorschlag: die Knotenebene (MODE, TIMer, RTIMe, STATe?) gehoert nach unten
+    in die Konfigurationsschicht, hier bleibt nur der Ablauf
+    'ruecksetzen - starten - warten - auslesen - stoppen'.
+
+    OFFEN (ROADMAP M0-3) - blockiert die Erprobung von M3-2, nicht dessen
+    Umsetzung: jedes Kommando dort ist ein Set-Kommando (auch '*CLS'), verlangt
+    also read_only=False. Ob das Geraet Set-Kommandos ueber Ethernet ohne
+    ':COMMunicate:REMote ON' annimmt, ist unbeantwortet - siehe
+    WTConfig.use_remote. Gegen FakeTransport laesst sich M3-2 schreiben und
+    pruefen; belegen laesst es sich erst am Geraet.
     """
 
     def __init__(self, session: WTSession, items: ItemAccess, read_only: bool = True) -> None:

@@ -9,6 +9,13 @@ konfiguration/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Die virtuelle Umgebung selbst. 'python -m venv' legt zwar ein eigenes
+# venv/.gitignore mit '*' an - das faellt aber weg, sobald die Umgebung mit
+# einem anderen Werkzeug (virtualenv, uv) neu angelegt wird.
+venv/
+.venv/
 
 dist/
 build/

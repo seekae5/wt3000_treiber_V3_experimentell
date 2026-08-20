@@ -98,6 +98,13 @@ class WTConfig:
     read_buffer_size: int = 64 * 1024
     # ZU VERIFIZIEREN: Ob das Geraet Set-Kommandos ueber Ethernet auch ohne
     # ':COMMunicate:REMote ON' annimmt. Offener Punkt der ROADMAP: M0-3.
+    #
+    # Daran haengt ROADMAP M3-2: dessen Kommandos (':INTEGrate:STARt/:STOP/
+    # :RESet', '*CLS', '*OPC?') sind saemtlich Set-Kommandos und laufen nur
+    # mit read_only=False. Stellt sich use_remote=True als noetig heraus,
+    # sperrt jeder Integrationslauf zusaetzlich das Bedienfeld - bei einer
+    # Wh-Messung ueber Stunden ist das eine bewusste Entscheidung und gehoert
+    # an der Aufrufstelle dokumentiert, nicht als Nebenwirkung hier.
     use_remote: bool = True
 
     # -- Auflaesungskette ---------------------------------------------------

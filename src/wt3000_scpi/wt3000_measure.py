@@ -44,6 +44,13 @@ def build_standard_profile() -> tuple[ItemSpec, ...]:
     FU wird nur fuer Element 3 gefuehrt: die Frequenzmessquelle steht laut
     ':MEASure?' auf U3/I3, deshalb liefern FU1 und FU2 strukturell NAN.
     Aendert sich die Frequenzmessquelle, ist diese Liste anzupassen.
+
+    OFFEN (ROADMAP M3-2): Fuer das dortige Abnahmekriterium - eine Wh-Messung
+    ueber eine definierte Dauer starten, beenden und auslesen - fehlen die
+    Integrationsitems (WH, WHP, WHM, AH, TIME; Schreibweise am Geraet zu
+    pruefen). Anzupassen ist dafuer nichts ausser dieser Datei:
+    ItemSpec.function ist eine freie Zeichenkette ohne Weissliste, es braucht
+    also nur ein zweites Profil neben diesem.
     """
     three_phase = ("U", "I", "P", "S", "Q", "LAMBDA", "PHI")
     sum_functions = ("U", "I", "P", "S", "Q", "LAMBDA")
@@ -73,6 +80,15 @@ class NumericHold:
     Wichtig: bleibt HOLD nach einem Absturz aktiv, liefert das Geraet in der
     naechsten Sitzung eingefrorene Werte, waehrend die Anzeige weiterlaeuft.
     OFF wird deshalb im __exit__ garantiert gesendet.
+
+    BEFUND zu ROADMAP M3-2, Spiegelstrich 'Einzelmessung im HOLD-Betrieb:
+    :SINGle (pruefen)': In der Kommandouebersicht des Projekts
+    (MarkDowns/WT3000_Commands_Overview.md) kommt ein Knoten ':SINGle' NICHT
+    vor - weder als eigene Gruppe noch unter :NUMeric oder :MEASure. Vorhanden
+    sind ':NUMeric:HOLD' (dieser Weg hier) und das Common Command '*TRG'. Der
+    Spiegelstrich ist damit in der vorliegenden Form nicht umsetzbar und vor
+    der Umsetzung neu zu fassen. Gegenprobe an IM WT3001E-17EN und am Geraet
+    steht aus.
     """
 
     def __init__(self, session: WTSession, enabled: bool = True) -> None:
@@ -318,6 +334,34 @@ def run_measurement_loop(
 
     Bricht sauber ab bei KeyboardInterrupt, erreichter Sampleanzahl oder
     abgelaufener Maximaldauer.
+
+    OFFEN (ROADMAP M3-1): Diese Funktion wird der Rumpf der Klasse
+    'Measurement'. Drei Stellen sind dabei anzupassen und nicht bloss zu
+    verschieben:
+
+      1. 'except KeyboardInterrupt' wird wirkungslos, sobald die Schleife in
+         einem Hintergrund-Thread laeuft - Python stellt SIGINT ausschliesslich
+         dem Haupt-Thread zu. Der Abbruch per Strg+C gehoert dann auf die
+         Aufruferseite (stop()/wait()), nicht hierher. Als blockierender
+         Generator 'stream()' bleibt er dagegen richtig, wo er ist.
+      2. 'time.sleep(wait)' muss 'stop_event.wait(wait)' werden, sonst greift
+         stop() erst nach dem laufenden Intervall. Bei :RATE 5 s sind das fuenf
+         Sekunden Verzug auf ein Stoppsignal - genau der Fall, den M3-1 mit
+         'threading.Event als Stoppsignal, nicht als Flag' meint.
+      3. Rueckstellung: HOLD wird hier bereits im 'with' zurueckgenommen und
+         greift damit auch bei stop(). Bereiche und Item-Tabelle liegen
+         dagegen beim Aufrufer (wt3000_ranging.applied_ranges(),
+         ItemAccess.applied()) - M3-1 verlangt sie im Thread. Wer diese
+         Context Manager kuenftig haelt, ist vor dem ersten Handgriff zu
+         entscheiden; es verschiebt die Verantwortung fuer den Geraetezustand.
+
+    OFFEN (ROADMAP M4-1, sinnvollerweise VOR M3-1): der Rueckgabeweg. Heute
+    wandert eine Messzeile als fuenf getrennte Parameter direkt in
+    recorder.write_row(). Der von M3-1 geforderte Generator 'stream()' braucht
+    dagegen EIN Objekt je Zyklus, und M3-3/M3-4 haengen zusaetzlich eine
+    Kennzeichnung daran (Dublette erkannt, Zyklus fehlt). Ohne die
+    'Sample'-Dataclass aus M4-1 entsteht diese Signatur zweimal - erst als
+    Tupel, dann noch einmal richtig.
     """
     stats = LoopStatistics()
     started_monotonic = time.monotonic()
