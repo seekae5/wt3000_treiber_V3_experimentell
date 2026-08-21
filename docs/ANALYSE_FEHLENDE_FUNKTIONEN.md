@@ -103,6 +103,82 @@ Harmonics-Synchronisation).
   Ausgabepuffer — deckt sich mit `drain_after_failure()`/`WTError`-Härtung aus
   M1-5; kein neuer Befund, nur Bestätigung des geplanten Wegs.
 
+### 0.3 — Realer Gerätecheck (2026-08-21)
+
+**Nicht mehr vermutet, sondern gemessen.** Abschnitt 5 dieser Datei hat fünf
+offene Fragen gelistet, die nur am Gerät zu klären waren. Alle fünf wurden am
+21.08.2026 gegen das reale Gerät (IP `192.168.10.20`) mit dem neuen
+Geräteskript [`tools/hardware/probe_capabilities.py`](../tools/hardware/probe_capabilities.py)
+abgefragt — nur-lesend, kein einziges Schreibkommando (Sitzung mit
+`read_only=True`). Protokoll liegt lokal unter
+`konfiguration/wt3000_probe_capabilities_20260821_124256.txt` (Verzeichnis ist
+`.gitignore`t, daher nicht im Repository).
+
+**Steckbrief:** `YOKOGAWA,760304-40-MV,0,F5.01` — Modell `760304-40-MV`,
+Firmware `F5.01`. `*OPT?` → `G6,B5,DT,C7,C5,CC`.
+
+| Code | Zustand | Betroffene Gruppen | Folge |
+|---|---|---|---|
+| G6 | **vorhanden** | `:HARMonics`, `:ACQuisition`, `:CURSor:FFT` | Rang 3 umsetzbar, obwohl G5 fehlt — G6 allein reicht laut Handbuch |
+| CC | **vorhanden** | `:CBCycle` | Rang 5 umsetzbar |
+| DT | **vorhanden** | `:MEASure:DMeasure`, `:COMPensation:V3A3` | Rang 2 ohne Einschränkung umsetzbar (Delta eingeschlossen) |
+| B5, C7 | **vorhanden** | `:HCOPy` | technisch ansprechbar, Einschätzung „kann entfallen" bleibt unverändert |
+| C5 | **vorhanden** | USB-Port für Peripheriegeräte (Handbuch zu `*OPT?`) | keine Kommandogruppe aus Abschnitt 0.1 betroffen, nur der Vollständigkeit halber notiert |
+| G5 | fehlt | — | ohne Wirkung, G6 deckt `:HARMonics` bereits ab |
+| FL | fehlt | `:FLICker` | Rang 10 (Flicker-Teil) an diesem Gerät **nicht ansprechbar** |
+| DA | fehlt | `:AOUTput` | Analogausgang an diesem Gerät **nicht ansprechbar** (war schon niedrige Priorität) |
+| MTR | fehlt, aber ohne Bedeutung | `:MOTor` | **ANSPRECHBAR** — siehe Motor-Befund unten; `MTR` ist an diesem Gerät kein zuverlässiger Indikator |
+
+**Motor-Befund, Rang 8 — geklärt (Nachtrag 21.08.2026, zweiter Lauf):**
+Der Modellcode `760304-40-MV` enthält `-MV` (Handbuch: Motor-Modellvariante),
+`*OPT?` meldet **kein** `MTR` — die beiden Indizien widersprachen sich im
+ersten Lauf. `frage_1_identitaet_und_optionen()` sendet seither zusätzlich
+`:MOTor:PM?` (Handbuch 6-81, ein reiner Query) und trifft damit die
+Entscheidung direkt, statt nur aus den beiden Indizien zu schließen. Ergebnis
+des zweiten Laufs: `:MOTor:PM?` → `1.0000;"W"` — das Gerät antwortet.
+**`:MOTor` ist an diesem Gerät ANSPRECHBAR.** Damit ist auch der Widerspruch
+aufgelöst: der Modellcode (`-MV`) war der zuverlässige Indikator, `*OPT?`s
+`MTR`-Code war es an diesem Gerät nicht — die theoretische Erwartung aus
+Abschnitt 0.1, `*OPT?` melde die "motor evaluation function (MTR)", trägt
+hier nicht. **Rang 8 ist damit zur Umsetzung freigegeben,** keine
+Modellvariante mehr zu prüfen.
+
+**Frage 2 (Panel-Sperre), Teilfrage (a) — beantwortet:** `:COMMunicate:LOCKout?`,
+`:SYSTem:KLOCk?` und `:SYSTem:SLOCk?` sind alle drei ansprechbar und stehen
+aktuell auf `0` (aus). Teilfrage (b) — Verhalten bei Verbindungsabbruch — ist
+ein Schreibvorgang und bleibt offen; **vorerst zurückgestellt (Nutzerentscheidung
+2026-08-21), kann bis auf Weiteres ignoriert werden.**
+
+**Frage 3 (CBCycle Trigger/Sync) — Konfigurationsteil beantwortet:**
+Sync-Quelle `U1` (interner Messkanal, keine externe Beschaltung nötig),
+Slope `RISE`, Trigger-Modus `AUTO` (läuft frei, wartet nicht auf ein Ereignis),
+Trigger-Quelle `U1`, Level `10.0 %`, Timeout `10 s`, Zustand `RESet`. In der
+Werkseinstellung dieses Geräts ist also **keine externe Verkabelung nötig**.
+Offen bleibt weiterhin nur der Wirkungsteil — ob `*TRG` allein einen
+synchronisierten Start auslöst (Schreibkommando, eigenes Skript nötig).
+
+**Frage 4 (`:INTEGrate:RTIMe?`) — Hypothese am Gerät bestätigt:** zwei Abfragen
+im Abstand von 2 s liefern denselben Wert
+(`2006,1,1,0,0,0;2006,1,1,1,0,0`). `:INTEGrate:TIMer?` steht auf `0,0,0`
+(nicht konfiguriert), Modus `NORM`, Zustand `RES` (kein Lauf aktiv). Die
+Analyseannahme aus Abschnitt 5 trägt am realen Gerät nicht — RTIMe ist die
+Start-/Stoppzeit, kein Restzeitzähler. Empfehlung unverändert: Fortschritt =
+`:INTEGrate:TIMer?` minus NUMeric-Item `TIME`.
+
+**Frage 5 (UPD-Bit) — gemessen statt vermutet, mit klarem Ergebnis:** bei
+`:RATE?` = `1.000 s` wurden in 10 s **3556 Proben** auf `:STATus:CONDition?`
+genommen (Rundlaufzeit 1,3 ms min / 2,8 ms Mittel / 125,0 ms max). **UPD=1 in
+0 von 3556 Proben (0,0 %)** — über zehn volle Aktualisierungszyklen hinweg
+keine einzige 1→0-Flanke. **Antwort auf Frage 5: reines Polling auf das
+UPD-Bit trägt M3-3 an diesem Gerät NICHT als alleinigen `sleep()`-Ersatz.**
+Die Hochphase ist entweder kürzer, als selbst eine Rundlaufzeit von wenigen
+Millisekunden auflösen kann, oder das Bit verhält sich bei dieser
+Aktualisierungsrate anders als im Handbuchbeispiel unterstellt. Für M3-3
+bleiben zwei Wege: über `:STATus:FILTer1 FALL` + `:STATus:EESE` und
+Service-Request gehen (Schreibzugriff nötig, noch nicht geprüft) — oder direkt
+mit einer Dublettenerkennung als Rückfallebene planen, statt sie nur als
+Absicherung vorzusehen.
+
 ---
 
 ## 1 — Abgleich: welche SCPI-Kommandogruppen sind im Code schon belegt?
@@ -243,43 +319,66 @@ gliedert.
 
 ## 4 — Priorisierte Kurzfassung
 
-| Rang | Baustein | Option nötig? | Warum |
-|---|---|---|---|
-| 0 | `*OPT?` in `DeviceInfo` auswerten | keine (Common Command) | Voraussetzung für alle optionsgebundenen Punkte unten — sollte vor Rang 3, 5, 8, 10 stehen, damit keine Arbeit an nicht vorhandener Hardware entsteht |
-| 1 | `IntegratorControl` (`:INTEGrate`) — Wh/Ah-Messung steuern | **nein** | Kernfunktion eines Leistungsmessgeräts, heute nicht steuerbar |
-| 2 | `ComputationConfig` (`:MEASure`, insb. Averaging) | **nein** (außer Delta-Teil, siehe unten) | Betrifft praktisch jede Messung, nicht nur Spezialfälle |
-| 3 | `HarmonicsConfig` (`:HARMonics`) | **`/G5` oder `/G6`** | Einer der Hauptanwendungsfälle des WT3000 — aber erst nach `*OPT?`-Check angehen |
-| 4 | Steuerbares Mess-Objekt + Trigger (`*TRG`/`GET`, `STATus:CONDition?`-Polling auf UPD-Bit) | **nein** | Grundlage für 2.1, 2.6 und robuste Automatisierung; Ereignismechanismus jetzt am Handbuch belegt (Abschnitt 0.2), nicht mehr nur Vermutung |
-| 5 | `:CBCycle` (zyklus-/ereignisgetriggerte Messung) | **`/CC`** | Für synchrone/getriggerte Anwendungsfälle jenseits der freilaufenden Schleife |
-| 6 | Erweiterter `SessionBackup` (inkl. Averaging/Harmonics/Motor) | folgt den Gruppen, die er sichert | Sicherheitsnetz, sobald 2–3 neue schreibbare Gruppen existieren |
-| 7 | Panel-Sperre (`COMMunicate:LOCKout` und/oder `SYSTem:KLOCk`) | **nein** | Kleiner Aufwand, spürbarer Schutz bei unbeaufsichtigten Läufen; beide Kommandos jetzt im Detail bekannt (Abschnitt 3) |
-| 8 | `:MOTor` (Motor-Wirkungsgrad) | **Modellvariante `-MV`**, keine Nachrüstoption | Nur falls das konkrete Gerät die MV-Variante ist — per `*IDN?` (Modellcode) klärbar, nicht per `*OPT?` |
-| 9 | `:STORe`/`:FILE` (geräteseitige Datenverwaltung) | **nein** | Ergänzung, kein Ersatz für die vorhandene Python-Messschleife; `STORe:SMODe INTEGrate` koppelt Speicherung direkt an Integrationszyklen |
-| 10 | `:FLICker`, `:ACQuisition` (Rohabtastdaten), `:IMAGe` | `/FL` bzw. `/G6` (IMAGe optionsfrei) | Nischenfälle — nur bei konkretem Bedarf |
-| — | `:WAVeform` (Anzeige-Wellenform, 1002 Punkte) | **nein** (Korrektur ggü. erster Fassung) | Optionsfrei, aber weiterhin niedrige Priorität laut ROADMAP „bewusst nicht enthalten" |
-| — | `:AOUTput`, `:HCOPy` | `/DA` bzw. `/B5`/`/C7` | Für einen programmatischen Treiber kaum relevant, entfallen kann geprüft werden |
+| Rang | Baustein | Option nötig? | Warum | Am Gerät (0.3, 21.08.2026) |
+|---|---|---|---|---|
+| 0 | `*OPT?` in `DeviceInfo` auswerten | keine (Common Command) | Voraussetzung für alle optionsgebundenen Punkte unten — sollte vor Rang 3, 5, 8, 10 stehen, damit keine Arbeit an nicht vorhandener Hardware entsteht | Abfrage funktioniert und ist geprüft (`probe_capabilities.py`) — Übernahme in `DeviceInfo` selbst steht noch aus |
+| 1 | `IntegratorControl` (`:INTEGrate`) — Wh/Ah-Messung steuern | **nein** | Kernfunktion eines Leistungsmessgeräts, heute nicht steuerbar | unverändert; `:INTEGrate:STATe?` antwortet (`RES`) |
+| 2 | `ComputationConfig` (`:MEASure`, insb. Averaging) | **nein** (außer Delta-Teil, siehe unten) | Betrifft praktisch jede Messung, nicht nur Spezialfälle | Delta-Teil **freigegeben** — `DT` ist verbaut |
+| 3 | `HarmonicsConfig` (`:HARMonics`) | **`/G5` oder `/G6`** | Einer der Hauptanwendungsfälle des WT3000 — aber erst nach `*OPT?`-Check angehen | **freigegeben** — `G6` ist verbaut (obwohl `G5` fehlt) |
+| 4 | Steuerbares Mess-Objekt + Trigger (`*TRG`/`GET`, `STATus:CONDition?`-Polling auf UPD-Bit) | **nein** | Grundlage für 2.1, 2.6 und robuste Automatisierung; Ereignismechanismus jetzt am Handbuch belegt (Abschnitt 0.2), nicht mehr nur Vermutung | UPD-Polling **widerlegt** (0 Treffer in 3556 Proben) — Weg über EESE/SRQ oder Dublettenerkennung nötig |
+| 5 | `:CBCycle` (zyklus-/ereignisgetriggerte Messung) | **`/CC`** | Für synchrone/getriggerte Anwendungsfälle jenseits der freilaufenden Schleife | **freigegeben** — `CC` ist verbaut, Werksconfig braucht keine externe Verkabelung |
+| 6 | Erweiterter `SessionBackup` (inkl. Averaging/Harmonics/Motor) | folgt den Gruppen, die er sichert | Sicherheitsnetz, sobald 2–3 neue schreibbare Gruppen existieren | unverändert |
+| 7 | Panel-Sperre (`COMMunicate:LOCKout` und/oder `SYSTem:KLOCk`) | **nein** | Kleiner Aufwand, spürbarer Schutz bei unbeaufsichtigten Läufen; beide Kommandos jetzt im Detail bekannt (Abschnitt 3) | alle drei Wege ansprechbar, aktuell aus; Verhalten bei Verbindungsabbruch **vorerst zurückgestellt** |
+| 8 | `:MOTor` (Motor-Wirkungsgrad) | **Modellvariante `-MV`**, keine Nachrüstoption | Nur falls das konkrete Gerät die MV-Variante ist — per `*IDN?` (Modellcode) klärbar, nicht per `*OPT?` | **freigegeben** — `:MOTor:PM?` antwortet (`1.0000;"W"`); Modellcode war der zuverlässige Indikator, `*OPT?`s `MTR` nicht |
+| 9 | `:STORe`/`:FILE` (geräteseitige Datenverwaltung) | **nein** | Ergänzung, kein Ersatz für die vorhandene Python-Messschleife; `STORe:SMODe INTEGrate` koppelt Speicherung direkt an Integrationszyklen | unverändert |
+| 10 | `:FLICker`, `:ACQuisition` (Rohabtastdaten), `:IMAGe` | `/FL` bzw. `/G6` (IMAGe optionsfrei) | Nischenfälle — nur bei konkretem Bedarf | `:FLICker` **entfällt** (`FL` fehlt); `:ACQuisition` **freigegeben** (`G6` verbaut) |
+| — | `:WAVeform` (Anzeige-Wellenform, 1002 Punkte) | **nein** (Korrektur ggü. erster Fassung) | Optionsfrei, aber weiterhin niedrige Priorität laut ROADMAP „bewusst nicht enthalten" | unverändert |
+| — | `:AOUTput`, `:HCOPy` | `/DA` bzw. `/B5`/`/C7` | Für einen programmatischen Treiber kaum relevant, entfallen kann geprüft werden | `:AOUTput` **entfällt** (`DA` fehlt); `:HCOPy` technisch ansprechbar (`B5`+`C7` verbaut), Einschätzung „kann entfallen" bleibt |
 
 ---
 
 ## 5 — Offene Fragen für den nächsten Geräte-/Optionscheck
 
-* **Zuerst zu klären, jetzt trivial:** `*OPT?` und `*IDN?` einmal am
-  tatsächlichen Gerät abfragen — beantwortet in einem Aufruf, welche der in
-  Abschnitt 0.1 gelisteten optionsgebundenen Gruppen (`/G5`, `/G6`, `/CC`,
-  `/FL`, `/DA`, `/DT`, `/B5`, `/C7`) überhaupt ansprechbar sind und ob es sich
-  um die Motor-Variante `-MV` handelt (Modellcode aus `*IDN?`, z. B.
-  `760304-04-MV`). Damit erübrigt sich das bisherige Rätselraten für Rang 3,
-  5, 8 und 10 der Prioritätenliste.
-* Welcher der beiden Panel-Sperr-Wege (`COMMunicate:LOCKout` vs.
-  `SYSTem:KLOCk`) ist tatsächlich gewünscht, und wie verhält er sich beim
-  Verbindungsabbruch (bleibt die Sperre hängen, wenn die Python-Sitzung
-  abstürzt, bevor sie sie wieder aufhebt)? Syntax beider Kommandos ist jetzt
-  bekannt (Abschnitt 3), nur das Verhalten am realen Gerät fehlt noch.
-* Reicht `*TRG`/`GET` (laut Handbuch „same operation as when SINGLE is
-  pressed") allein für synchronisierten Start, oder braucht
-  `:CBCycle:TRIGger`/`:SYNChronize` zusätzlich eine externe Triggerquelle?
-* Liefert `:INTEGrate:RTIMe?` einen belastbaren Fortschritts-/Restzeitwert für
-  eine UI-Anzeige während einer laufenden Wh-Messung?
-* Wie zuverlässig/schnell schaltet das UPD-Bit (Abschnitt 0.2) in der Praxis
-  um — reicht es als alleiniger Ersatz für `sleep()`, oder braucht M3-3
-  trotzdem eine Dublettenerkennung als Rückfallebene?
+**Update 21.08.2026:** Alle fünf Fragen dieses Abschnitts wurden gegen das
+reale Gerät geprüft — Details, Rohwerte und Protokollpfad stehen in
+Abschnitt 0.3. Zusammenfassung je Frage:
+
+* ~~`*OPT?` und `*IDN?` am Gerät abfragen~~ — **beantwortet.** Modell
+  `760304-40-MV`, Firmware `F5.01`, verbaute Optionen `G6, B5, DT, C7, C5, CC`.
+  Damit ist auch geklärt, welche der optionsgebundenen Gruppen aus Abschnitt
+  0.1 an diesem Gerät ansprechbar sind (siehe Tabelle in 0.3 und die
+  „Am Gerät"-Spalte oben) — kein Rätselraten mehr für Rang 3, 5, 8, 10. Der
+  anfängliche Widerspruch bei Rang 8 (Motor) ist im zweiten Lauf per
+  `:MOTor:PM?` direkt aufgelöst worden, siehe 0.3.
+* Panel-Sperr-Weg (`COMMunicate:LOCKout` vs. `SYSTem:KLOCk`/`SLOCk`) —
+  **Teilfrage (a) beantwortet:** alle drei Wege existieren am Gerät, sind
+  ansprechbar und stehen aktuell auf aus. **Teilfrage (b)** — Verhalten bei
+  Verbindungsabbruch — bleibt technisch offen (braucht ein Schreibskript mit
+  hartem Prozessabbruch), ist aber **vorerst zurückgestellt** (Entscheidung
+  vom 21.08.2026) **und kann bis auf Weiteres ignoriert werden.**
+* Reicht `*TRG`/`GET` allein für synchronisierten Start, oder braucht
+  `:CBCycle` zusätzlich eine externe Triggerquelle? — **Konfigurationsteil
+  beantwortet:** Werkseinstellung ist Sync-Quelle `U1` (interner Messkanal)
+  und Trigger-Modus `AUTO` (frei laufend) — keine externe Beschaltung nötig.
+  Der Wirkungsteil (löst `*TRG` allein eine Messung aus?) bleibt offen,
+  braucht ein Schreibkommando und ist von geringerer Priorität, seit der
+  Konfigurationsteil geklärt ist.
+* ~~Liefert `:INTEGrate:RTIMe?` einen belastbaren Fortschritts-/Restzeitwert?~~
+  — **beantwortet: nein.** Zwei Abfragen im Abstand von 2 s liefern denselben
+  Wert; RTIMe ist die Start-/Stoppzeit des Echtzeitmodus, kein Zähler.
+  Fortschritt muss stattdessen aus `:INTEGrate:TIMer?` minus NUMeric-Item
+  `TIME` berechnet werden.
+* ~~Wie zuverlässig/schnell schaltet das UPD-Bit um?~~ — **beantwortet:
+  unzuverlässig genug, um allein nicht zu genügen.** 0 von 3556 Proben in 10 s
+  trafen UPD=1. M3-3 braucht entweder den EESE/`FILTer`+Service-Request-Weg
+  (noch ungeprüft, Schreibzugriff nötig) oder eine Dublettenerkennung als
+  tragenden Mechanismus statt nur als Rückfallebene.
+
+**Verbleibend offen:**
+1. Wirkungsteil von `*TRG`/`GET` (löst es tatsächlich eine synchronisierte
+   Messung aus?) — echtes Schreibkommando, braucht ein eigenes Skript;
+   niedrige Priorität, seit der Konfigurationsteil geklärt ist.
+
+Teilfrage (b) der Panel-Sperre ist davon ausdrücklich ausgenommen — zurückgestellt, siehe oben.
+Rang 8 (Motor) ist mit dem zweiten Lauf (siehe 0.3) vollständig geklärt und
+aus dieser Liste entfernt.
