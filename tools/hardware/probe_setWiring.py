@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from tools.hardware.probe_voltage_range import OUTPUT_DIR
+from wt3000_scpi import Quantity
 from wt3000_scpi.wt3000_common import setup_logging
 from wt3000_scpi.wt3000_core import (
     TmctlTransport,
@@ -42,4 +43,4 @@ def main () -> int:
             )
 
             try:
-                orginal = access.get_wiring
+                orginal = access.get_wiring() #hier muss die klasse korrekt aufgerufen werden
