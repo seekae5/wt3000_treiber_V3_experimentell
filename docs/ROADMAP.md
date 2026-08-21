@@ -141,7 +141,15 @@ beruhen.
 
 - dieselbe bestückte Elementliste an `InputConfig` und `RangeAccess` geben
 - Bereichstabellen nach Modultyp auswählen
-- Optionen und Firmware erfassen **(prüfen)**
+- [x] **Optionen und Firmware erfassen — umgesetzt 2026-08-21.** `*OPT?` wird
+  beim Verbinden abgefragt und in `DeviceInfo.options` abgelegt; die Firmware
+  stand schon vorher aus `*IDN?` bereit. `supports(gruppe)` und
+  `require_option(gruppe)` prüfen jede der zehn optionsgebundenen
+  Kommandogruppen dagegen, bevor sie angesprochen wird — Voraussetzung für
+  Rang 3, 5, 8 und 10 aus
+  [ANALYSE_FEHLENDE_FUNKTIONEN.md](ANALYSE_FEHLENDE_FUNKTIONEN.md#4--priorisierte-kurzfassung).
+  `:MOTor` wird bewusst am Modellcode `-MV` und nicht an `MTR` entschieden
+  (Gerätebefund vom 21.08.2026).
 - unbekannte Module oder Tabellenwerte als `WTError` mit Kontext melden
 - Modellprüfung beim Verbinden mit deutlicher Warnung
 

@@ -49,10 +49,11 @@ also erst geklärt sein, welche Optionen das konkrete Gerät hat.
 genau die installierten Optionen als kommagetrennte Liste (Beispiel aus dem
 Handbuch: `*OPT? -> G6,B5,DT,FQ,DA,V1,C2,C7,C5,CC,FL`; keine Option → `"0"`).
 **Das ist die direkte, bereits am Gerät verfügbare Lösung für ROADMAP M1-3
-(„Optionen und Firmware erfassen (prüfen)")** — kein offener Punkt mehr, nur
-noch eine ausstehende Umsetzung: `*OPT?` einmal beim Verbindungsaufbau
-abfragen und in `DeviceInfo` ablegen, danach jede optionsabhängige Gruppe
-dagegen prüfen, bevor sie angesprochen wird.
+(„Optionen und Firmware erfassen (prüfen)")** — kein offener Punkt mehr, und
+seit dem 21.08.2026 auch keine ausstehende Umsetzung mehr: `*OPT?` wird einmal
+beim Verbindungsaufbau abgefragt und in `DeviceInfo` abgelegt, jede
+optionsabhängige Gruppe wird dagegen geprüft, bevor sie angesprochen wird.
+**Details in Abschnitt 6.**
 
 **Gegenbeispiel — keine Option nötig:** `:INTEGrate` (Abschnitt 2.1, größte
 Lücke), `:MEASure` (Averaging, Effizienz, Frequenz — Abschnitt 2.2, bis auf
@@ -321,7 +322,7 @@ gliedert.
 
 | Rang | Baustein | Option nötig? | Warum | Am Gerät (0.3, 21.08.2026) |
 |---|---|---|---|---|
-| 0 | `*OPT?` in `DeviceInfo` auswerten | keine (Common Command) | Voraussetzung für alle optionsgebundenen Punkte unten — sollte vor Rang 3, 5, 8, 10 stehen, damit keine Arbeit an nicht vorhandener Hardware entsteht | Abfrage funktioniert und ist geprüft (`probe_capabilities.py`) — Übernahme in `DeviceInfo` selbst steht noch aus |
+| 0 | `*OPT?` in `DeviceInfo` auswerten | keine (Common Command) | Voraussetzung für alle optionsgebundenen Punkte unten — sollte vor Rang 3, 5, 8, 10 stehen, damit keine Arbeit an nicht vorhandener Hardware entsteht | **umgesetzt 2026-08-21** — siehe Abschnitt 6 |
 | 1 | `IntegratorControl` (`:INTEGrate`) — Wh/Ah-Messung steuern | **nein** | Kernfunktion eines Leistungsmessgeräts, heute nicht steuerbar | unverändert; `:INTEGrate:STATe?` antwortet (`RES`) |
 | 2 | `ComputationConfig` (`:MEASure`, insb. Averaging) | **nein** (außer Delta-Teil, siehe unten) | Betrifft praktisch jede Messung, nicht nur Spezialfälle | Delta-Teil **freigegeben** — `DT` ist verbaut |
 | 3 | `HarmonicsConfig` (`:HARMonics`) | **`/G5` oder `/G6`** | Einer der Hauptanwendungsfälle des WT3000 — aber erst nach `*OPT?`-Check angehen | **freigegeben** — `G6` ist verbaut (obwohl `G5` fehlt) |
@@ -382,3 +383,56 @@ Abschnitt 0.3. Zusammenfassung je Frage:
 Teilfrage (b) der Panel-Sperre ist davon ausdrücklich ausgenommen — zurückgestellt, siehe oben.
 Rang 8 (Motor) ist mit dem zweiten Lauf (siehe 0.3) vollständig geklärt und
 aus dieser Liste entfernt.
+---
+
+## 6 — Umgesetzt: Rang 0, Optionserfassung (2026-08-21)
+
+Der erste Punkt der Prioritätenliste ist gebaut. Er stand bewusst vor allen
+anderen: solange der Treiber nicht weiß, was verbaut ist, kann jede Arbeit an
+den Rängen 3, 5, 8 und 10 an nicht vorhandener Hardware vorbeigehen — und ein
+Kommando einer nicht verbauten Gruppe fällt nicht als solches auf, sondern
+bleibt **unbeantwortet** und läuft in den Timeout. Die Meldung sieht dann nach
+Verbindungsabbruch aus.
+
+**Was `DeviceInfo` jetzt kann** (`src/wt3000_scpi/wt3000_device.py`):
+
+| Baustein | Bedeutung |
+|---|---|
+| `options` | Menge der Optionscodes, z. B. `{'G6','B5','DT','C7','C5','CC'}` |
+| `options_raw` | Rohantwort auf `*OPT?`, für Fehlermeldungen und Protokoll |
+| `options_known` | ob `*OPT?` überhaupt beantwortet wurde |
+| `has_option(code)` | einzelner Code, `/G6` und `G6` gleichwertig |
+| `supports(gruppe)` | ist die Kommandogruppe an diesem Gerät ansprechbar? |
+| `require_option(gruppe)` | dasselbe als `WTError` mit Code, Modell und Rohantwort |
+| `unavailable_groups()` | alle nachweislich gesperrten Gruppen — steht im Steckbrief |
+| `OPTION_REQUIREMENTS` | Gruppe → Optionscodes, aus Abschnitt 0.1, aus der Paketwurzel importierbar |
+
+**Drei Entwurfsentscheidungen, die aus dem Gerätecheck stammen:**
+
+1. **`:MOTor` steht nicht in `OPTION_REQUIREMENTS`.** Der Befund aus
+   Abschnitt 0.3 ist als Regel im Code hinterlegt: entschieden wird am
+   Modellcode `-MV` **oder** an `MTR`, nicht an `MTR` allein. Stünde die
+   Gruppe mit `('MTR',)` in der Tabelle, würde der Treiber an diesem Gerät
+   eine vorhandene Gruppe abweisen — schlimmer als gar keine Prüfung. Ein
+   Prüfsatz hält das fest.
+2. **Unbekannt ist nicht dasselbe wie „fehlt".** Bleibt `*OPT?` unbeantwortet,
+   ist `options_known` falsch und `supports()` liefert für **jede** Gruppe
+   `True`: dann läuft das Kommando im Zweifel ins Gerät und scheitert dort mit
+   dessen eigener Meldung. Der Treiber rät nicht — er sperrt nur, was er
+   nachweislich weiß.
+3. **`G5` wird nicht gebraucht.** `:HARMonics` verlangt `G5` **oder** `G6`;
+   am eingemessenen Gerät ist nur `G6` verbaut, und das genügt. Deshalb sind
+   die Anforderungen je Gruppe ein Tupel und kein einzelner Code.
+
+**Nebenbefund, mit repariert:** ein fehlgeschlagenes `*IDN?` räumte bisher
+keine verspätete Antwort ab. Sie hätte den nächsten Query beantwortet — nach
+dieser Änderung `*OPT?`, das dann die Gerätekennung als Optionsliste gelesen
+hätte, davor `:INPut:WIRing?`, das die Verdrahtung trägt. Beide informativen
+Abfragen rufen im Fehlerfall jetzt `drain_after_failure()`.
+
+**Was Rang 0 nicht erledigt:** die Optionen werden erfasst und abfragbar
+gemacht, aber noch von keiner Gruppe benutzt — es gibt bislang keine
+optionsgebundene Gruppe im Treiber. Der erste Aufruf von `require_option()`
+aus Fachcode heraus entsteht mit Rang 3 (`:HARMonics`) oder Rang 5
+(`:CBCycle`). Die übrigen Teilpunkte von M1-3 (Bereichstabellen nach
+Modultyp, Modellprüfung beim Verbinden) bleiben offen.

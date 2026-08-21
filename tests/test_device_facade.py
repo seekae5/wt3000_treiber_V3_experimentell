@@ -23,7 +23,10 @@ import pytest
 # jetzt in conftest.py - die Stufenskripte brauchen dasselbe Geraetemodell.
 from conftest import ItemTableTransport, base_responses
 
-from wt3000_scpi import WT3000, WTConfig, WTError
+from wt3000_scpi import OPTION_REQUIREMENTS, WT3000, WTConfig, WTError
+# NEU (M1-3): die reinen Funktionen der Optionserfassung werden einzeln
+# geprueft, nicht nur ueber die Fassade.
+from wt3000_scpi.wt3000_device import parse_options, required_options
 from wt3000_scpi import wt3000_device  # NEU (P-1): fuer monkeypatch auf TmctlTransport
 from wt3000_scpi.wt3000_core import ReadOnlyViolation, TmctlError  # TmctlError: NEU (P-2)
 from wt3000_scpi.wt3000_input import ConfigLocked
@@ -92,6 +95,227 @@ def test_fehlende_verdrahtung_ist_ein_fehler():
     del responses[":INPUT:WIRING"]
     with pytest.raises(KeyError):
         open_facade(FakeTransport(responses))
+
+
+# ---------------------------------------------------------------------------
+# Geraeteoptionen (ROADMAP M1-3, Rang 0 aus ANALYSE_FEHLENDE_FUNKTIONEN.md)
+# ---------------------------------------------------------------------------
+#
+# Worum es geht: zehn Kommandogruppen des WT3000 sind an eine verbaute Option
+# gebunden, und ein Kommando einer nicht verbauten Gruppe wird nicht etwa
+# abgelehnt - es bleibt UNBEANTWORTET. Ohne die Optionserfassung faellt das
+# erst im Timeout auf, mit einer Meldung, die nach Verbindungsabbruch aussieht.
+#
+# Die Antworttabelle des Modellgeraets (conftest.OPT) ist die des real
+# eingemessenen Geraets: G6, B5, DT, C7, C5, CC verbaut - FL und DA nicht.
+# Damit pruefen dieselben Saetze beide Richtungen.
+
+
+def test_optionen_werden_beim_verbinden_erhoben():
+    with open_facade(FakeTransport(base_responses())) as wt:
+        assert wt.device.options_known is True
+        assert wt.device.options == frozenset({"G6", "B5", "DT", "C7", "C5", "CC"})
+        assert wt.device.has_option("G6") is True
+        # Die Bestellschreibweise mit Schraegstrich meint denselben Code.
+        assert wt.device.has_option("/g6") is True
+        assert wt.device.has_option("FL") is False
+
+
+def test_geraet_ohne_option_meldet_null():
+    """'*OPT? -> 0' heisst 'keine verbaut' - und ist keine leere Antwort."""
+    with open_facade(FakeTransport(base_responses(options="0"))) as wt:
+        assert wt.device.options == frozenset()
+        assert wt.device.options_known is True
+        assert wt.device.supports(":HARMonics") is False
+
+
+def test_optionsfreie_gruppen_brauchen_keine_pruefung():
+    """Die groesste Luecke (':INTEGrate', Rang 1) haengt an keiner Option."""
+    with open_facade(FakeTransport(base_responses(options="0"))) as wt:
+        for gruppe in (":INTEGrate", ":MEASure", ":STORe", ":WAVeform", ":SYSTem"):
+            assert wt.device.supports(gruppe) is True, gruppe
+
+
+def test_supports_trennt_verbaute_von_fehlenden_gruppen():
+    with open_facade(FakeTransport(base_responses())) as wt:
+        info = wt.device
+        # Verbaut: G6 allein genuegt fuer :HARMonics, G5 wird nicht gebraucht.
+        assert info.supports(":HARMonics") is True
+        assert info.supports(":ACQuisition") is True
+        assert info.supports(":CBCycle") is True
+        assert info.supports(":MEASure:DMeasure") is True
+        # Nicht verbaut - genau die beiden Gruppen, die auch am realen Geraet
+        # fehlen.
+        assert info.supports(":FLICker") is False
+        assert info.supports(":AOUTput") is False
+
+
+def test_unterknoten_erbt_die_anforderung_seiner_gruppe():
+    with open_facade(FakeTransport(base_responses(options="0"))) as wt:
+        assert wt.device.supports(":HARMonics:ORDer") is False
+        assert wt.device.supports(":harmonics:pllsource") is False
+        # Und kein Praefixmatching in die andere Richtung: ':HARMonicsX' ist
+        # keine Untergruppe von ':HARMonics'.
+        assert wt.device.supports(":HARMonicsX") is True
+
+
+def test_require_option_nennt_code_modell_und_rohantwort():
+    with open_facade(FakeTransport(base_responses())) as wt:
+        wt.device.require_option(":HARMonics")  # verbaut - kein Fehler
+        with pytest.raises(WTError) as fehler:
+            wt.device.require_option(":FLICker")
+        text = str(fehler.value)
+        assert ":FLICker" in text
+        assert "FL" in text
+        assert "WT3000" in text
+        assert "G6,B5,DT,C7,C5,CC" in text
+
+
+# -- Motorvariante ----------------------------------------------------------
+#
+# Der Befund vom 21.08.2026 in einem Pruefsatz: am realen Geraet meldete
+# '*OPT?' KEIN MTR, obwohl ':MOTor:PM?' antwortete. Zuverlaessig war der
+# Modellcode '-MV'. Wer ':MOTor' spaeter doch in OPTION_REQUIREMENTS aufnimmt,
+# faellt hier auf - und nicht erst am Geraet, wo der Treiber dann eine
+# vorhandene Gruppe abweisen wuerde.
+
+MOTORMODELL = "YOKOGAWA,760304-40-MV,0,F5.01"
+
+
+def test_motorvariante_wird_am_modellcode_erkannt_nicht_an_mtr():
+    responses = base_responses(options="G6,B5,DT,C7,C5,CC")
+    responses["*IDN"] = MOTORMODELL
+    with open_facade(FakeTransport(responses)) as wt:
+        assert wt.device.has_option("MTR") is False
+        assert wt.device.is_motor_model is True
+        assert wt.device.supports(":MOTor") is True
+        assert wt.device.supports(":MOTor:PM") is True
+
+
+def test_ohne_motorvariante_und_ohne_mtr_ist_motor_gesperrt():
+    with open_facade(FakeTransport(base_responses())) as wt:
+        assert wt.device.is_motor_model is False
+        assert wt.device.supports(":MOTor") is False
+
+
+def test_mtr_allein_genuegt_ebenfalls():
+    """Der umgekehrte Fall: ein Geraet, das MTR doch meldet."""
+    with open_facade(FakeTransport(base_responses(options="MTR"))) as wt:
+        assert wt.device.is_motor_model is False
+        assert wt.device.supports(":MOTor") is True
+
+
+# -- Wenn '*OPT?' nicht antwortet -------------------------------------------
+
+
+def test_unbeantwortetes_opt_sperrt_nichts_und_bricht_nicht_ab(caplog):
+    """Unbekannt ist nicht dasselbe wie 'fehlt'.
+
+    Der Treiber darf eine Gruppe nur abweisen, wenn er WEISS, dass die Option
+    fehlt. Ohne Antwort laeuft das Kommando im Zweifel ins Geraet und
+    scheitert dort mit dessen eigener Meldung - geraten wird nicht.
+    """
+    responses = base_responses()
+    del responses["*OPT"]
+    transport = FakeTransport(responses, fail_commands=["*OPT?"])
+    with caplog.at_level("WARNING"), open_facade(transport) as wt:
+        info = wt.device
+        assert info.options_known is False
+        assert info.options == frozenset()
+        assert info.options_raw == "unbekannt"
+        assert info.supports(":FLICker") is True
+        assert info.has_option("G6") is False
+        # Der Rest des Steckbriefs steht trotzdem.
+        assert info.model == "WT3000"
+        assert info.wiring == ("V3A3", "P1W2")
+    assert any("*OPT?" in eintrag.getMessage() for eintrag in caplog.records)
+
+
+def test_nach_fehlgeschlagenem_opt_wird_abgeraeumt():
+    """Sonst beantwortet eine verspaetete Antwort den NAECHSTEN Query.
+
+    Der naechste ist ':INPut:WIRing?' - der Query, der die Verdrahtung traegt.
+    Ohne Abraeumen waere der ganze Steckbrief um eine Position verschoben,
+    ohne dass irgendwo ein Fehler auftraete. Sichtbar ist das Abraeumen an der
+    kurzzeitig herabgesetzten Zeitschranke.
+    """
+    responses = base_responses()
+    del responses["*OPT"]
+    transport = FakeTransport(responses, fail_commands=["*OPT?"])
+    with open_facade(transport) as wt:
+        assert wt.device.wiring == ("V3A3", "P1W2")
+    config = WTConfig()
+    assert config.drain_timeout_ms in transport.timeouts_ms
+    # Und die normale Zeitschranke steht danach wieder.
+    assert transport.timeouts_ms[-1] == config.timeout_ms
+
+
+def test_auch_ein_fehlgeschlagenes_idn_wird_abgeraeumt():
+    """Dasselbe eine Abfrage frueher - sonst faengt '*OPT?' die Kennung ein."""
+    responses = base_responses()
+    del responses["*IDN"]
+    transport = FakeTransport(responses, fail_commands=["*IDN?"])
+    with open_facade(transport) as wt:
+        assert wt.device.identity == "unbekannt"
+        # '*OPT?' hat trotzdem seine eigene Antwort bekommen.
+        assert wt.device.options_known is True
+        assert "G6" in wt.device.options
+    assert WTConfig().drain_timeout_ms in transport.timeouts_ms
+
+
+# -- Steckbrief -------------------------------------------------------------
+
+
+def test_steckbrief_nennt_optionen_und_gesperrte_gruppen():
+    with open_facade(FakeTransport(base_responses())) as wt:
+        text = "\n".join(wt.device.describe())
+    assert "Optionen:" in text
+    assert "G6" in text
+    # Was nicht geht, steht im Steckbrief und nicht erst im Timeout.
+    gesperrt = text.split("Nicht ansprechbar", 1)[-1]
+    assert ":FLICker" in gesperrt
+    assert ":AOUTput" in gesperrt
+    assert ":MOTor" in gesperrt
+    # Was geht, steht dort nicht.
+    assert ":HARMonics" not in gesperrt
+    assert ":CBCycle" not in gesperrt
+
+
+def test_steckbrief_unterscheidet_keine_optionen_von_unbekannt():
+    with open_facade(FakeTransport(base_responses(options="0"))) as wt:
+        assert "keine verbaut" in "\n".join(wt.device.describe())
+
+    responses = base_responses()
+    del responses["*OPT"]
+    with open_facade(FakeTransport(responses, fail_commands=["*OPT?"])) as wt:
+        text = "\n".join(wt.device.describe())
+    assert "unbekannt" in text
+    # Ohne Wissen wird nichts als gesperrt gemeldet.
+    assert "Nicht ansprechbar" not in text
+
+
+# -- Die reinen Funktionen --------------------------------------------------
+
+
+def test_parse_options_vereinheitlicht_die_schreibweise():
+    assert parse_options(" /G6, dt ,CC ") == frozenset({"G6", "DT", "CC"})
+    assert parse_options("0") == frozenset()
+    assert parse_options("") == frozenset()
+    # Auch mit eingeschaltetem Antwortkopf lesbar.
+    assert parse_options(":OPTION G6,DT") == frozenset({"G6", "DT"})
+
+
+def test_required_options_kennt_optionsfreie_gruppen():
+    assert required_options(":INTEGrate") is None
+    assert required_options(":HARMonics") == ("G5", "G6")
+    assert required_options(":harmonics:order") == ("G5", "G6")
+    assert required_options(":MEASure:DMeasure") == ("DT",)
+    # ':MEASure' selbst ist optionsfrei - nur der Delta-Zweig nicht.
+    assert required_options(":MEASure") is None
+    # ':MOTor' steht bewusst nicht in der Tabelle, siehe Kopf dieses
+    # Abschnitts und OPTION_REQUIREMENTS.
+    assert required_options(":MOTor") is None
+    assert ":MOTor" not in OPTION_REQUIREMENTS
 
 
 # ---------------------------------------------------------------------------

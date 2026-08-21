@@ -31,10 +31,12 @@
 # sind ab jetzt Beispiele fuer den Weg ohne Fassade, nicht mehr der einzige.
 #
 # BEWUSST NICHT hier erledigt (jeweils eigener Meilenstein):
-#   M1-3  DeviceInfo ist auf das reduziert, was die Verdrahtung der
-#         Fachobjekte braucht. Die Bereichstabellen nach Modultyp und
-#         InputConfig._elements_of('ALL') (Befund B-12) haengen weiter an
-#         Konstanten.
+#   M1-3  TEILWEISE erledigt: die verbauten Geraeteoptionen werden seit dem
+#         21.08.2026 beim Verbinden erhoben ('*OPT?') und sind ueber
+#         DeviceInfo.supports()/require_option() abfragbar - Voraussetzung
+#         fuer jede optionsgebundene Kommandogruppe. Offen bleiben die
+#         Bereichstabellen nach Modultyp, InputConfig._elements_of('ALL')
+#         (Befund B-12) und die Modellpruefung beim Verbinden.
 #   M1-4  ensure_protocol_state() - der Sollzustand wird hier geprueft
 #         (check_protocol_state), aber nicht hergestellt.
 #   M1-5  drain_after_failure() wird weiterhin nirgends aufgerufen (B-04).
@@ -49,7 +51,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 
-from .wt3000_common import DEFAULT_ELEMENTS, condition_warnings, parse_condition
+from .wt3000_common import (
+    DEFAULT_ELEMENTS,
+    condition_warnings,
+    parse_condition,
+    strip_response_header,
+)
 from .wt3000_core import TmctlTransport, Transport, WTConfig, WTError, WTSession
 from .wt3000_input import InputConfig, WiringUnit
 from .wt3000_itemspec import (
@@ -75,9 +82,114 @@ from .wt3000_numeric import ItemTable, NumericItem, NumericValue, read_numeric_v
 from .wt3000_rangeio import RangeAccess, sigma_members_from_units
 from .wt3000_ranging import RangeBackup, RangePlan, RangeReport, applied_ranges
 
-__all__ = ["DeviceInfo", "ItemAccess", "MeasureControl", "WT3000"]
+__all__ = [
+    "OPTION_REQUIREMENTS",
+    "DeviceInfo",
+    "ItemAccess",
+    "MeasureControl",
+    "WT3000",
+    "parse_options",
+]
 
 _log = logging.getLogger("wt3000.device")
+
+
+# ---------------------------------------------------------------------------
+# Geraeteoptionen
+# NEU (ROADMAP M1-3 "Optionen und Firmware erfassen (pruefen)")
+# ---------------------------------------------------------------------------
+#
+# Zehn der 22 SCPI-Kommandogruppen des WT3000 haengen an einer verbauten
+# Hardwareoption (docs/ANALYSE_FEHLENDE_FUNKTIONEN.md, Abschnitt 0.1). Fehlt
+# sie, ist das Kommando nicht etwa wirkungslos: das Geraet legt einen Eintrag
+# in die Fehlerqueue und ANTWORTET NICHT - der Query laeuft in den Timeout.
+# Ohne diese Tabelle faellt das erst dort auf, und zwar mit einer Meldung, die
+# nach Verbindungsabbruch aussieht statt nach fehlender Option. Genau deshalb
+# steht Rang 0 der Analyse vor den Raengen 3, 5, 8 und 10: erst wissen, was
+# das Geraet kann, dann daran bauen.
+#
+# '*OPT?' liefert die Bestueckung als kommagetrennte Liste (Handbuch 6-115),
+# am eingemessenen Geraet 'G6,B5,DT,C7,C5,CC'; ist keine Option verbaut,
+# antwortet das Geraet mit '0'. Die Abfrage ist ein Common Command und selbst
+# an keine Option gebunden - sie funktioniert also immer.
+#
+# ':MOTor' FEHLT IN DIESER TABELLE, UND ZWAR MIT ABSICHT. Das Handbuch nennt
+# zu '*OPT?' zwar eine "motor evaluation function (MTR)", am realen Geraet
+# (Protokoll vom 21.08.2026, tools/hardware/probe_capabilities.py) trug dieses
+# Indiz aber nicht: '*OPT?' meldete KEIN MTR, ':MOTor:PM?' antwortete
+# trotzdem. Zuverlaessig war dort der Modellcode aus '*IDN?' ('760304-40-MV').
+# Stuende ':MOTor' mit ('MTR',) in der Tabelle, wuerde der Treiber eine
+# vorhandene Gruppe abweisen - schlimmer als gar keine Pruefung. Die Gruppe
+# wird deshalb in 'supports()' gesondert behandelt: Modellcode ODER MTR.
+
+
+#: Kommandogruppe -> Optionscodes, von denen MINDESTENS EINER verbaut sein muss.
+#
+# Die Schluessel stehen in der Langform mit der ueblichen SCPI-Auszeichnung
+# (Grossbuchstaben = Kurzform des Handbuchs). Verglichen wird unabhaengig von
+# Gross- und Kleinschreibung, ABER nicht gegen die Kurzform: ':harmonics'
+# trifft, ':HARM' nicht. Ein Unterknoten erbt die Anforderung seines Eintrags,
+# ':HARMonics:ORDer' also die von ':HARMonics'.
+OPTION_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    ":HARMonics": ("G5", "G6"),
+    ":ACQuisition": ("G6",),
+    ":CURSor:FFT": ("G6",),
+    ":DISPlay:FFT": ("G6",),
+    ":CBCycle": ("CC",),
+    ":FLICker": ("FL",),
+    ":AOUTput": ("DA",),
+    ":HCOPy": ("B5", "C7"),
+    ":MEASure:DMeasure": ("DT",),
+    ":MEASure:COMPensation:V3A3": ("DT",),
+}
+
+#: Dieselbe Tabelle in Grossschrift - der Vergleichsschluessel, einmal gebaut.
+_OPTION_REQUIREMENTS_UPPER: dict[str, tuple[str, ...]] = {
+    node.upper(): codes for node, codes in OPTION_REQUIREMENTS.items()
+}
+
+
+def normalize_option_code(code: str) -> str:
+    """Einen Optionscode vergleichbar machen: '/G6', ' g6 ' und 'G6' sind eins.
+
+    Das Handbuch schreibt die Optionen in der Bestellbezeichnung mit
+    Schraegstrich ('/G6'), '*OPT?' antwortet ohne ihn ('G6'). Beide Formen
+    sollen hier zum selben Ergebnis fuehren, damit ein Aufrufer die Schreibung
+    nicht raten muss.
+    """
+    return code.strip().upper().lstrip("/")
+
+
+def parse_options(response: str) -> frozenset[str]:
+    """Antwort auf '*OPT?' in eine Menge von Optionscodes zerlegen.
+
+    Die '0' des Geraets bedeutet "keine Option verbaut" und ist deshalb KEIN
+    Code, sondern liefert die leere Menge.
+    """
+    text = strip_response_header(response)
+    return frozenset(
+        code for code in (normalize_option_code(t) for t in text.split(",")) if code and code != "0"
+    )
+
+
+def required_options(group: str) -> tuple[str, ...] | None:
+    """Welche Optionen kommen fuer diese Kommandogruppe in Frage?
+
+    Rueckgabe: Tupel der Codes, von denen einer genuegt - oder None, wenn die
+    Gruppe an keine Option gebunden ist (':INTEGrate', ':MEASure', ':STORe',
+    ':WAVeform' und die uebrigen Basisgruppen).
+    """
+    key = group.strip().upper()
+    treffer = [
+        (node, codes)
+        for node, codes in _OPTION_REQUIREMENTS_UPPER.items()
+        if key == node or key.startswith(node + ":")
+    ]
+    if not treffer:
+        return None
+    # Der laengste Treffer gewinnt: ':MEASure:DMeasure' ist genauer als ein
+    # (hier nicht vorhandener, spaeter denkbarer) Eintrag ':MEASure'.
+    return max(treffer, key=lambda paar: len(paar[0]))[1]
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +202,21 @@ class DeviceInfo:
     """Was beim Verbinden einmalig ueber das Geraet erhoben wird.
 
     Bewusst klein gehalten (ROADMAP M1-1): hier steht genau das, was die
-    Fassade braucht, um die Fachobjekte zu verdrahten. Der vollstaendige
-    Steckbrief - Optionen, Bereichstabellen nach Modultyp, Modellpruefung -
-    ist M1-3 und gehoert dann hier hinein, nicht an eine zweite Stelle.
+    Fassade braucht, um die Fachobjekte zu verdrahten.
+
+    UEBERARBEITET (M1-3, Teil "Optionen und Firmware erfassen"): die verbauten
+    Geraeteoptionen gehoeren inzwischen dazu. Sie stehen hier und nicht an
+    einer zweiten Stelle, weil sie dieselbe Eigenschaft haben wie Verdrahtung
+    und Modultypen - einmal beim Verbinden erhoben, danach unveraenderlich.
+    Wer wissen will, ob eine Kommandogruppe an diesem Geraet ueberhaupt
+    ansprechbar ist, fragt 'supports()' oder laesst 'require_option()' den
+    Fehler mit Begruendung werfen:
+
+        if wt.device.supports(":HARMonics"):
+            ...
+
+    Offen aus M1-3 bleiben die Bereichstabellen nach Modultyp und die
+    Modellpruefung beim Verbinden.
     """
 
     #: Rohantwort auf '*IDN?'. 'unbekannt', wenn die Abfrage fehlgeschlagen ist.
@@ -114,6 +238,17 @@ class DeviceInfo:
     sigma_members: dict[str, tuple[int, ...]] = field(default_factory=dict)
     #: True, wenn die Elementliste angenommen werden musste statt gelesen.
     elements_assumed: bool = False
+    #: Rohantwort auf '*OPT?'. 'unbekannt', wenn die Abfrage fehlgeschlagen ist.
+    options_raw: str = "unbekannt"
+    #: Verbaute Optionscodes ohne Schraegstrich, z.B. {'G6', 'DT', 'CC'}.
+    options: frozenset[str] = frozenset()
+    #: True, wenn '*OPT?' beantwortet wurde.
+    #
+    # Der Unterschied ist wichtig: eine leere 'options' heisst bei
+    # options_known=True "keine Option verbaut" (Geraeteantwort '0'), bei
+    # options_known=False dagegen "nicht bekannt". Nur im ersten Fall darf der
+    # Treiber eine Gruppe vorab abweisen - im zweiten wuerde er raten.
+    options_known: bool = False
 
     # -- Erzeugen -----------------------------------------------------------
 
@@ -123,21 +258,51 @@ class DeviceInfo:
 
         Die Fehlerbehandlung ist mit Absicht zweigeteilt:
 
-        '*IDN?' ist rein informativ - schlaegt es fehl, wird das protokolliert
-        und weitergearbeitet. Verdrahtung und Modultypen dagegen tragen die
-        Verdrahtung der Fachobjekte; ohne sie muesste die Fassade die
-        Elementzuordnung raten, und geraten wird in diesem Treiber nichts.
-        Ein Fehler dort kommt deshalb als WTError heraus.
+        '*IDN?' und '*OPT?' sind rein informativ - schlaegt eines fehl, wird
+        das protokolliert und weitergearbeitet. Verdrahtung und Modultypen
+        dagegen tragen die Verdrahtung der Fachobjekte; ohne sie muesste die
+        Fassade die Elementzuordnung raten, und geraten wird in diesem Treiber
+        nichts. Ein Fehler dort kommt deshalb als WTError heraus.
+
+        NEU (M1-3): nach jedem der beiden informativen Queries steht im
+        Fehlerfall 'drain_after_failure()'. Der Grund ist nicht Kosmetik -
+        eine verspaetete Antwort wuerde sonst den NAECHSTEN Query beantworten,
+        und der naechste ist hier entweder '*OPT?' (der dann eine
+        Geraetekennung als Optionsliste laese) oder ':INPut:WIRing?' (das die
+        Verdrahtung traegt). Der ganze Steckbrief waere um eine Position
+        verschoben, ohne dass irgendwo ein Fehler auftraete.
         """
         identity = "unbekannt"
         try:
             identity = session.query("*IDN?")
         except WTError as error:
             _log.warning("*IDN? fehlgeschlagen: %s - Steckbrief bleibt unvollstaendig", error)
+            session.drain_after_failure()
 
         parts = [p.strip() for p in identity.split(",")]
         while len(parts) < 4:
             parts.append("")
+
+        # NEU (M1-3): die verbaute Bestueckung. Zur Reihenfolge sagt das
+        # Handbuch (6-115): "The *OPT? query must be the last query of the
+        # program message." Gemeint ist die einzelne Programmnachricht, und
+        # WTSession sendet ohnehin genau einen Query je Nachricht - die Regel
+        # ist hier also schon durch die Bauart eingehalten.
+        options_raw = "unbekannt"
+        options: frozenset[str] = frozenset()
+        options_known = False
+        try:
+            options_raw = session.query("*OPT?")
+            options = parse_options(options_raw)
+            options_known = True
+        except WTError as error:
+            _log.warning(
+                "*OPT? fehlgeschlagen: %s - die verbauten Optionen bleiben "
+                "unbekannt; optionsgebundene Gruppen werden deshalb nicht "
+                "vorab abgewiesen, sondern laufen im Zweifel ins Geraet",
+                error,
+            )
+            session.drain_after_failure()
 
         # Rein lesende Sicht: dieses Objekt benutzt die vorhandenen Parser aus
         # wt3000_input, statt ':INPut:MODUle?' ein viertes Mal selbst zu
@@ -172,6 +337,9 @@ class DeviceInfo:
             elements=populated,
             sigma_members=sigma_members_from_units(units),
             elements_assumed=assumed,
+            options_raw=options_raw,
+            options=options,
+            options_known=options_known,
         )
 
     # -- Auswerten ----------------------------------------------------------
@@ -181,10 +349,19 @@ class DeviceInfo:
         lines = [
             f"Geraet:      {self.model or '?'} ({self.manufacturer or '?'})",
             f"Seriennr.:   {self.serial or '?'}    Firmware: {self.firmware or '?'}",
+            f"Optionen:    {self.options_summary()}",
             f"Verdrahtung: {', '.join(self.wiring) or '?'}",
             f"Elemente:    {self.elements}"
             + ("  (angenommen, nicht gelesen)" if self.elements_assumed else ""),
         ]
+        # Was an DIESEM Geraet nicht ansprechbar ist, gehoert in den
+        # Steckbrief und nicht erst in den Timeout des ersten Kommandos.
+        gesperrt = self.unavailable_groups()
+        if gesperrt:
+            lines.append(
+                "  Nicht ansprechbar (Option fehlt): "
+                + ", ".join(f"{gruppe} ({'/'.join(codes)})" for gruppe, codes in gesperrt)
+            )
         for element in sorted(self.modules):
             kind = self.modules[element]
             label = {30: "30-A-Element", 2: "2-A-Element", 0: "nicht bestueckt"}.get(
@@ -205,6 +382,100 @@ class DeviceInfo:
     def has_element(self, element: int) -> bool:
         """True, wenn dieses Element bestueckt ist."""
         return element in self.elements
+
+    # -- Optionen (M1-3) ----------------------------------------------------
+
+    def has_option(self, code: str) -> bool:
+        """True, wenn dieser Optionscode als verbaut gemeldet wurde.
+
+        '/G6' und 'G6' sind gleichwertig. Ist '*OPT?' fehlgeschlagen, ist die
+        Antwort immer False - fuer die Frage "darf ich diese Gruppe
+        ansprechen?" ist deshalb 'supports()' zustaendig und nicht diese
+        Methode: nur 'supports()' unterscheidet "fehlt" von "unbekannt".
+        """
+        return normalize_option_code(code) in self.options
+
+    @property
+    def is_motor_model(self) -> bool:
+        """True, wenn der Modellcode die Motorvariante '-MV' traegt.
+
+        Die Motorauswertung ist keine Nachruestoption, sondern eine
+        Modellvariante ('760304-40-MV'). Am eingemessenen Geraet war dieser
+        Code der zuverlaessige Indikator, '*OPT?' dagegen nicht - die
+        Begruendung steht am Kopf von OPTION_REQUIREMENTS.
+        """
+        return "MV" in {teil.strip().upper() for teil in self.model.split("-")}
+
+    def supports(self, group: str) -> bool:
+        """Ist diese SCPI-Kommandogruppe an diesem Geraet ansprechbar?
+
+        Drei Faelle, und der dritte ist der, auf den es ankommt:
+
+        * Die Gruppe braucht keine Option (':INTEGrate', ':MEASure',
+          ':STORe', ':WAVeform', ...) -> True, ohne Ruecksicht auf '*OPT?'.
+        * Die Gruppe braucht eine, und '*OPT?' wurde beantwortet -> True,
+          wenn mindestens einer der in Frage kommenden Codes verbaut ist.
+        * Die Gruppe braucht eine, aber '*OPT?' ist fehlgeschlagen -> True.
+          Unbekannt ist NICHT dasselbe wie "fehlt": lieber laeuft das
+          Kommando ins Geraet und scheitert dort mit dessen eigener Meldung,
+          als dass der Treiber eine vorhandene Gruppe aufgrund einer
+          fehlenden Antwort sperrt. Die Warnung dazu steht im Protokoll von
+          'read()'.
+        """
+        key = group.strip().upper()
+        if key == ":MOTOR" or key.startswith(":MOTOR:"):
+            # Sonderfall, siehe Kopf von OPTION_REQUIREMENTS.
+            return self.is_motor_model or self.has_option("MTR")
+        required = required_options(key)
+        if required is None:
+            return True
+        if not self.options_known:
+            return True
+        return any(code in self.options for code in required)
+
+    def require_option(self, group: str) -> None:
+        """Vor dem ersten Kommando einer optionsgebundenen Gruppe aufrufen.
+
+        Wirft WTError, wenn die Option nachweislich fehlt - mit Modellcode
+        und Rohantwort im Text, damit die Meldung ohne Rueckfrage einzuordnen
+        ist. Ohne diesen Aufruf antwortet das Geraet auf ein Kommando einer
+        nicht verbauten Gruppe gar nicht; der Query laeuft in den Timeout und
+        die Meldung sieht nach Verbindungsabbruch aus.
+        """
+        if self.supports(group):
+            return
+        required = required_options(group)
+        codes = " oder ".join(required) if required else "MTR bzw. Modellvariante -MV"
+        raise WTError(
+            f"Kommandogruppe {group} ist an diesem Geraet nicht ansprechbar: "
+            f"Option {codes} fehlt. Modell {self.model or '?'}, "
+            f"*OPT? -> {self.options_raw}"
+        )
+
+    def unavailable_groups(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Alle Gruppen, deren Option nachweislich fehlt - fuer den Steckbrief.
+
+        Solange '*OPT?' unbeantwortet blieb, ist die Rueckgabe leer: nichts
+        ist nachweislich gesperrt, wenn nichts bekannt ist.
+        """
+        if not self.options_known:
+            return ()
+        gesperrt = [
+            (gruppe, codes)
+            for gruppe, codes in OPTION_REQUIREMENTS.items()
+            if not self.supports(gruppe)
+        ]
+        if not self.supports(":MOTor"):
+            gesperrt.append((":MOTor", ("Modellvariante -MV",)))
+        return tuple(gesperrt)
+
+    def options_summary(self) -> str:
+        """Optionen als eine Zeile - unterscheidet 'keine' von 'unbekannt'."""
+        if not self.options_known:
+            return "unbekannt (*OPT? nicht beantwortet)"
+        if not self.options:
+            return "keine verbaut (*OPT? -> 0)"
+        return ", ".join(sorted(self.options))
 
 
 # ---------------------------------------------------------------------------

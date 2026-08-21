@@ -73,7 +73,17 @@ from .wt3000_core import (
     WTError,
     WTSession,
 )
-from .wt3000_device import DeviceInfo, ItemAccess, MeasureControl, WT3000
+# UEBERARBEITET (M1-3): 'OPTION_REQUIREMENTS' steht hier neben der Fassade,
+# weil jede kuenftige optionsgebundene Gruppe (Analyse Rang 3, 5, 8, 10)
+# dagegen prueft - die Tabelle gehoert damit zur oeffentlichen Oberflaeche
+# und nicht in ein Modul, das man erst finden muss.
+from .wt3000_device import (
+    OPTION_REQUIREMENTS,
+    DeviceInfo,
+    ItemAccess,
+    MeasureControl,
+    WT3000,
+)
 from .wt3000_input import (
     ConfigLocked,
     LineFilter,
@@ -101,6 +111,7 @@ __all__ = [
     "DeviceInfo",
     "ItemAccess",
     "MeasureControl",
+    "OPTION_REQUIREMENTS",
     # Verbindung
     "WTConfig",
     "WTSession",

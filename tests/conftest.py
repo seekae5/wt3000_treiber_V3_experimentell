@@ -331,6 +331,12 @@ def stufenlauf(monkeypatch, tmp_path):
 
 IDN = "YOKOGAWA,WT3000,C1B234567,F2.11"
 
+# NEU (M1-3): die Optionsantwort des Modellgeraets. Uebernommen vom real
+# eingemessenen Geraet (docs/ANALYSE_FEHLENDE_FUNKTIONEN.md, Abschnitt 0.3):
+# G6 und CC verbaut, FL und DA nicht - damit deckt die Antworttabelle beide
+# Richtungen ab, statt nur den freundlichen Fall.
+OPT = "G6,B5,DT,C7,C5,CC"
+
 _ITEM_NODE = re.compile(r"^:NUMERIC:NORMAL:ITEM(\d+)$")
 
 
@@ -339,12 +345,16 @@ def base_responses(
     modules: str = "30,30,30,30",
     header: str = "0",
     numeric_format: str = "FLOat",
+    options: str = OPT,
 ) -> dict:
     """Antworten, die die Fassade beim Verbinden und Pruefen braucht."""
     table = dict(range_responses())
     table.update(
         {
             "*IDN": IDN,
+            # NEU (M1-3): DeviceInfo.read() fragt seit der Optionserfassung
+            # zwei Common Commands ab statt einem.
+            "*OPT": options,
             ":INPUT:WIRING": wiring,
             ":INPUT:MODULE": modules,
             ":COMMUNICATE:HEADER": header,

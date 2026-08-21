@@ -1,4 +1,4 @@
-# Änderungen — konsolidierter Stand 2026-08-18 bis 2026-08-20
+# Änderungen — konsolidierter Stand 2026-08-18 bis 2026-08-21
 
 **Projektstand:** `wt3000-scpi 0.3.0`
 
@@ -142,6 +142,73 @@ zu schließen und meldet erst danach den ersten Fehler.
 `MeasureControl.record()` nimmt eine beliebige Senke; `record_csv()` bleibt der
 bequeme CSV-Einstieg. Parquet wurde nicht ergänzt, weil das Projekt weiterhin keine
 Laufzeitabhängigkeit benötigt.
+
+---
+
+## 2026-08-21 — Geräteoptionen im Steckbrief (M1-3, Teilpunkt)
+
+### Warum zuerst
+
+Zehn der 22 SCPI-Kommandogruppen des WT3000 hängen an einer verbauten
+Hardwareoption. Fehlt sie, wird das Kommando nicht abgelehnt — es bleibt
+**unbeantwortet**, der Query läuft in den Timeout, und die Meldung sieht nach
+Verbindungsabbruch aus. Das ist der Grund, warum
+[ANALYSE_FEHLENDE_FUNKTIONEN.md](ANALYSE_FEHLENDE_FUNKTIONEN.md) diesen Punkt
+als **Rang 0** vor alle Gerätegruppen stellt: ohne ihn kann Arbeit an den
+Rängen 3 (`:HARMonics`), 5 (`:CBCycle`), 8 (`:MOTor`) und 10 an nicht
+vorhandener Hardware vorbeigehen.
+
+### `DeviceInfo` erhebt die Bestückung
+
+`DeviceInfo.read()` fragt `*OPT?` direkt nach `*IDN?` ab. Neu sind die Felder
+`options`, `options_raw` und `options_known` sowie die Methoden `has_option()`,
+`is_motor_model`, `supports()`, `require_option()`, `unavailable_groups()` und
+`options_summary()`. Die Zuordnung Gruppe → Option steht als
+`OPTION_REQUIREMENTS` in der Paketwurzel, weil jede künftige optionsgebundene
+Gruppe dagegen prüft.
+
+`describe()` — und damit `log_summary()` beim Verbinden — nennt jetzt die
+verbauten Optionen und die nachweislich gesperrten Gruppen. Was am Gerät nicht
+geht, steht damit im Steckbrief statt erst im Timeout des ersten Kommandos.
+
+### Drei Entscheidungen aus dem Gerätebefund
+
+- **`:MOTor` steht bewusst nicht in `OPTION_REQUIREMENTS`.** Am eingemessenen
+  Gerät meldete `*OPT?` kein `MTR`, obwohl `:MOTor:PM?` antwortete; zuverlässig
+  war der Modellcode `-MV`. Entschieden wird deshalb über Modellcode **oder**
+  `MTR`. Stünde die Gruppe mit `('MTR',)` in der Tabelle, würde der Treiber
+  eine vorhandene Gruppe abweisen.
+- **Unbekannt ist nicht „fehlt".** Bleibt `*OPT?` unbeantwortet, liefert
+  `supports()` für jede Gruppe `True`: das Kommando läuft im Zweifel ins Gerät
+  und scheitert dort mit dessen eigener Meldung. Gesperrt wird nur, was
+  nachweislich fehlt.
+- **Anforderungen sind Tupel.** `:HARMonics` verlangt `G5` **oder** `G6`; am
+  Gerät ist nur `G6` verbaut, und das genügt.
+
+### Nebenbefund, mit repariert
+
+Ein fehlgeschlagenes `*IDN?` räumte bisher keine verspätete Antwort ab. Sie
+hätte den nächsten Query beantwortet — nach dieser Änderung `*OPT?`, davor
+`:INPut:WIRing?`, das die Verdrahtung trägt. Beide informativen Abfragen rufen
+im Fehlerfall jetzt `drain_after_failure()`.
+
+### Prüfung
+
+16 neue Prüfsätze in `tests/test_device_facade.py` (491 → 507), darunter der Motorbefund
+als Regressionsschutz. Das Gerätemodell der Testsuite (`conftest.base_responses`)
+antwortet auf `*OPT?` mit der Bestückung des realen Geräts, deckt also beide
+Richtungen ab.
+
+```text
+pytest: 507 passed
+ruff:   All checks passed
+mypy:   Success: no issues found in 17 source files
+```
+
+Offen aus M1-3 bleiben die Bereichstabellen nach Modultyp und die
+Modellprüfung beim Verbinden. Der erste Aufruf von `require_option()` aus
+Fachcode entsteht mit Rang 3 oder Rang 5 — bis dahin sind die Optionen erfasst
+und abfragbar, aber von keiner Gruppe benutzt.
 
 ---
 
