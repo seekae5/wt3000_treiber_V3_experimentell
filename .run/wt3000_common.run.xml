@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="wt3000_common" type="PythonConfigurationType" factoryName="Python">
-    <module name="wt3000_treiber_V3_experimentell" />
+    <module name="wt_treiber_V3e" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
